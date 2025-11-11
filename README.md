@@ -43,7 +43,7 @@ This will create a virtual environment and install all dependencies.
 
 ## Usage
 
-### Run the Example
+### Run the Basic Example
 
 ```bash
 uv run main.py
@@ -56,30 +56,39 @@ source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 python main.py
 ```
 
-### Run the Example Module Directly
+### Run the Example Modules Directly
 
+**Basic Example:**
 ```bash
 uv run python -m src.multi_agent_mobile_ui_assistant.example
+```
+
+**Advanced Agent Example:**
+```bash
+uv run python -m src.multi_agent_mobile_ui_assistant.agent_example
 ```
 
 ## Project Structure
 
 ```
 .
-├── .python-version          # Python version specification
-├── pyproject.toml          # Project configuration and dependencies
-├── main.py                 # Main entry point
+├── .python-version                         # Python version specification
+├── pyproject.toml                         # Project configuration and dependencies
+├── uv.lock                                # Locked dependency versions
+├── main.py                                # Main entry point
 ├── src/
 │   └── multi_agent_mobile_ui_assistant/
-│       ├── __init__.py     # Package initialization
-│       └── example.py      # Basic LangGraph example
-└── README.md              # This file
+│       ├── __init__.py                    # Package initialization
+│       ├── example.py                     # Basic LangGraph example
+│       └── agent_example.py               # Advanced agent with tools example
+└── README.md                              # This file
 ```
 
-## Example Description
+## Examples Description
 
-The included example demonstrates:
+### Basic Example (example.py)
 
+Demonstrates:
 1. **State Management**: Using TypedDict to define graph state
 2. **Node Creation**: Multiple processing nodes in the graph
 3. **Conditional Routing**: Dynamic edge routing based on state
@@ -90,6 +99,21 @@ The graph flow:
 - Conditionally routes to either `node_2` or `node_3` based on step count
 - Processes through the selected path
 - Ends after completing all nodes
+
+### Advanced Agent Example (agent_example.py)
+
+Demonstrates:
+1. **Multi-Tool Agent**: Agent that uses multiple tools sequentially
+2. **Task Analysis**: Initial task understanding and planning
+3. **Tool Orchestration**: Automatic tool selection and execution
+4. **Result Synthesis**: Combining outputs from multiple tools
+
+The agent workflow:
+- Analyzes the incoming task
+- Executes data collection tool
+- Executes data processing tool
+- Synthesizes results from all tools
+- Completes with a summary
 
 ## Dependencies
 
