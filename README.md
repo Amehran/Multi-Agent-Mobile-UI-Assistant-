@@ -187,6 +187,41 @@ Plus accessibility and design review feedback.
 - `langchain-core>=1.0.4`: LangChain core functionality
 - `langchain-openai>=1.0.2`: OpenAI integration for LangChain
 
+## Testing
+
+The project includes comprehensive unit tests for all modules.
+
+### Install Test Dependencies
+
+```bash
+uv sync --extra dev
+```
+
+### Run Tests
+
+```bash
+# Run all tests
+uv run pytest
+
+# Run with coverage report
+uv run pytest --cov=src/multi_agent_mobile_ui_assistant --cov-report=term-missing
+
+# Run specific test file
+uv run pytest tests/test_ui_generator.py
+
+# Run with verbose output
+uv run pytest -v
+```
+
+### Test Coverage
+
+The test suite includes:
+- **test_example.py**: Tests for basic LangGraph workflow (13 tests)
+- **test_agent_example.py**: Tests for advanced agent workflow (17 tests)
+- **test_ui_generator.py**: Tests for UI generator system (50+ tests)
+
+See [tests/README.md](tests/README.md) for detailed testing documentation.
+
 ## Development
 
 ### Adding Dependencies
