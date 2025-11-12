@@ -91,14 +91,18 @@ def extract_code_from_output(output: str) -> str:
     lines = output.split("\n")
     code_lines = []
     in_code = False
+    brace_count = 0
     
     for line in lines:
         if "@Composable" in line:
             in_code = True
         if in_code:
             code_lines.append(line)
-        if in_code and line.strip() == "}" and len(code_lines) > 5:
-            break
+            # Count braces to find the matching closing brace
+            brace_count += line.count("{") - line.count("}")
+            # Stop when we've closed all braces (back to 0)
+            if brace_count == 0 and len(code_lines) > 5:
+                break
     
     return "\n".join(code_lines) if code_lines else output
 
@@ -388,10 +392,15 @@ def generate_preview_html(code: str) -> str:
         'Image': '#00BCD4',
         'TextField': '#FFC107',
         'LazyColumn': '#8BC34A',
-        'LazyRow': '#3F51B5'
+        'LazyRow': '#3F51B5',
+        'Icon': '#FF5722',
+        'Spacer': '#9E9E9E',
+        'Divider': '#795548'
     }
     
-    for line in lines:
+    i = 0
+    while i < len(lines):
+        line = lines[i]
         stripped = line.strip()
         
         # Detect containers
@@ -409,55 +418,120 @@ def generate_preview_html(code: str) -> str:
                 
                 indent_level += 1
         
-        # Detect UI components
-        if 'Text(' in stripped:
-            # Extract text content
-            if 'text = "' in stripped:
+        # Detect Icon
+        if 'Icon(' in stripped:
+            icon_name = "Icon"
+            if 'Icons.Default.' in stripped:
+                try:
+                    icon_name = stripped.split('Icons.Default.')[1].split(',')[0].split(')')[0].strip()
+                except:
+                    pass
+            preview_html.append(f'<div style="margin: 8px 0 8px {indent_level * 20}px; padding: 12px; background: #fff3e0; border-left: 3px solid {component_colors["Icon"]}; border-radius: 3px; text-align: center;">')
+            preview_html.append(f'⭕ <strong>{icon_name}</strong>')
+            if '.size(' in stripped:
+                try:
+                    size = stripped.split('.size(')[1].split(')')[0]
+                    preview_html.append(f' <span style="color: #666; font-size: 0.8em;">({size})</span>')
+                except:
+                    pass
+            preview_html.append('</div>')
+        
+        # Detect Spacer
+        elif 'Spacer(' in stripped and 'height' in stripped:
+            try:
+                height = stripped.split('.height(')[1].split(')')[0]
+                preview_html.append(f'<div style="margin: 8px 0 8px {indent_level * 20}px; height: 4px; background: repeating-linear-gradient(90deg, #ddd 0px, #ddd 5px, transparent 5px, transparent 10px); border-radius: 2px;">')
+                preview_html.append(f'<span style="font-size: 0.7em; color: #999;">↕️ {height}</span>')
+                preview_html.append('</div>')
+            except:
+                pass
+        
+        # Detect Text
+        elif 'Text(' in stripped and 'text = "' in stripped:
+            try:
                 text_content = stripped.split('text = "')[1].split('"')[0]
                 preview_html.append(f'<div style="margin: 8px 0 8px {indent_level * 20}px; padding: 8px; background: #e3f2fd; border-left: 3px solid {component_colors["Text"]}; border-radius: 3px;">')
                 preview_html.append(f'📝 <strong>Text:</strong> "{text_content}"')
+                if 'headlineLarge' in stripped:
+                    preview_html.append(' <span style="color: #666; font-size: 0.8em;">(headline)</span>')
+                elif 'bodyMedium' in stripped or 'bodySmall' in stripped:
+                    preview_html.append(' <span style="color: #666; font-size: 0.8em;">(body)</span>')
                 preview_html.append('</div>')
+            except:
+                pass
         
-        elif 'Button(' in stripped and 'Text(' in code[code.index(stripped):code.index(stripped)+200]:
-            # Try to find button text
-            button_text = "Button"
-            next_lines = '\n'.join(lines[lines.index(line):min(lines.index(line)+5, len(lines))])
-            if 'Text("' in next_lines:
-                try:
-                    button_text = next_lines.split('Text("')[1].split('"')[0]
-                except (IndexError, ValueError):
-                    pass
+        # Detect OutlinedTextField
+        elif 'OutlinedTextField(' in stripped:
+            label = "TextField"
+            placeholder = "Enter text"
+            # Look ahead for label and placeholder
+            for j in range(i, min(i + 6, len(lines))):
+                if 'label = { Text("' in lines[j]:
+                    try:
+                        label = lines[j].split('label = { Text("')[1].split('"')[0]
+                    except:
+                        pass
+                if 'placeholder = { Text("' in lines[j]:
+                    try:
+                        placeholder = lines[j].split('placeholder = { Text("')[1].split('"')[0]
+                    except:
+                        pass
             
-            preview_html.append(f'<div style="margin: 8px 0 8px {indent_level * 20}px; padding: 10px 16px; background: {component_colors["Button"]}; color: white; border-radius: 4px; display: inline-block; font-weight: 500;">')
-            preview_html.append(f'🔘 {button_text}')
+            preview_html.append(f'<div style="margin: 8px 0 8px {indent_level * 20}px; padding: 12px; border: 2px solid {component_colors["TextField"]}; border-radius: 8px; background: white;">')
+            preview_html.append(f'<div style="font-size: 0.75em; color: #666; margin-bottom: 4px;">{label}</div>')
+            preview_html.append(f'✏️ <span style="color: #999;">{placeholder}</span>')
             preview_html.append('</div>')
         
-        elif 'Image(' in stripped or 'Box(' in stripped and 'Image' in code:
-            preview_html.append(f'<div style="margin: 8px 0 8px {indent_level * 20}px; padding: 20px; background: linear-gradient(135deg, #e0e0e0 0%, #bdbdbd 100%); border-radius: 4px; text-align: center; color: #666;">')
-            preview_html.append('🖼️ <strong>Image Placeholder</strong>')
+        # Detect Button or OutlinedButton
+        elif ('Button(' in stripped or 'OutlinedButton(' in stripped) and i < len(lines) - 1:
+            button_text = "Button"
+            button_type = "filled" if 'Button(' in stripped else "outlined"
+            # Look ahead for Text
+            for j in range(i, min(i + 5, len(lines))):
+                if 'Text("' in lines[j]:
+                    try:
+                        button_text = lines[j].split('Text("')[1].split('"')[0]
+                    except:
+                        pass
+                    break
+            
+            if button_type == "filled":
+                preview_html.append(f'<div style="margin: 8px 0 8px {indent_level * 20}px; padding: 12px 24px; background: {component_colors["Button"]}; color: white; border-radius: 8px; display: inline-block; font-weight: 500; text-align: center;">')
+            else:
+                preview_html.append(f'<div style="margin: 8px 0 8px {indent_level * 20}px; padding: 12px 24px; background: white; border: 2px solid {component_colors["Button"]}; color: {component_colors["Button"]}; border-radius: 8px; display: inline-block; font-weight: 500; text-align: center;">')
+            preview_html.append(f'� {button_text}')
             preview_html.append('</div>')
         
-        elif 'TextField(' in stripped:
-            hint = "Enter text"
-            if 'hint = "' in stripped:
-                try:
-                    hint = stripped.split('hint = "')[1].split('"')[0]
-                except (IndexError, ValueError):
-                    pass
-            preview_html.append(f'<div style="margin: 8px 0 8px {indent_level * 20}px; padding: 10px; border: 2px solid {component_colors["TextField"]}; border-radius: 4px; background: white;">')
-            preview_html.append(f'✏️ <span style="color: #999;">{hint}</span>')
-            preview_html.append('</div>')
+        # Detect HorizontalDivider with text
+        elif 'HorizontalDivider(' in stripped:
+            # Check if this is part of a Row with text (OR divider pattern)
+            is_or_divider = False
+            for j in range(max(0, i-2), min(i+3, len(lines))):
+                if 'Text("OR"' in lines[j] or 'Text(\'OR\'' in lines[j]:
+                    is_or_divider = True
+                    break
+            
+            if is_or_divider and i > 0 and 'HorizontalDivider' not in lines[i-1]:
+                # This is the first divider in OR pattern
+                preview_html.append(f'<div style="margin: 16px 0 8px {indent_level * 20}px; display: flex; align-items: center; gap: 12px;">')
+                preview_html.append(f'<div style="flex: 1; height: 1px; background: #ddd;"></div>')
+                preview_html.append(f'<span style="color: #666; font-weight: 500;">OR</span>')
+                preview_html.append(f'<div style="flex: 1; height: 1px; background: #ddd;"></div>')
+                preview_html.append('</div>')
         
         # Close containers
         if stripped == '}' or stripped == '})':
             if indent_level > 0:
                 indent_level -= 1
                 preview_html.append('</div>')
+        
+        i += 1
     
     preview_html.append('</div>')
     preview_html.append('</div>')
     
     return '\n'.join(preview_html)
+
 
 
 # Main UI Layout
