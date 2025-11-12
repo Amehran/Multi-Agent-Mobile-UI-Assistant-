@@ -19,6 +19,7 @@ if str(src_path) not in sys.path:
 
 from src.multi_agent_mobile_ui_assistant.ui_generator import generate_ui_from_description
 from src.multi_agent_mobile_ui_assistant.llm_config import create_llm
+from src.multi_agent_mobile_ui_assistant.figma_mcp import FigmaMCP
 
 
 # Page configuration
@@ -133,28 +134,58 @@ def generate_initial_ui(description: str):
             validate = st.session_state.get('validate_code', True)
             return_report = st.session_state.get('show_validation_report', False)
             multi_file = st.session_state.get('multi_file', False)
+            use_figma = st.session_state.get('use_figma', False)
             
-            # Generate UI with options
-            output = generate_ui_from_description(
-                description,
-                validate=validate,
-                return_report=return_report and validate,
-                multi_file=multi_file
-            )
+            # Check if using Figma
+            figma_design = None
+            if use_figma:
+                figma_token = st.session_state.get('figma_token', '')
+                figma_file_key = st.session_state.get('figma_file_key', '')
+                
+                if figma_token and figma_file_key:
+                    try:
+                        with st.spinner("🎨 Extracting Figma design..."):
+                            figma = FigmaMCP(access_token=figma_token)
+                            figma_design = figma.extract_design(file_key=figma_file_key)
+                            
+                            # Convert Figma design directly to Compose
+                            code = figma.convert_to_compose(figma_design)
+                            
+                            st.success(f"✅ Imported design from Figma: {figma_design.name}")
+                            st.info(f"📊 Found {len(figma_design.colors)} colors, {len(figma_design.typography)} text styles, {len(figma_design.components)} components")
+                    except Exception as e:
+                        st.error(f"Failed to import from Figma: {str(e)}")
+                        st.info("Falling back to text-based generation...")
+                        figma_design = None
+                else:
+                    st.warning("Figma credentials missing. Using text-based generation.")
             
-            # Handle validation report if returned
-            validation_report = None
-            if isinstance(output, dict) and 'code' in output:
-                code = output['code']
-                validation_report = output.get('validation_report')
+            # If not using Figma or Figma failed, use standard generation
+            if not figma_design:
+                # Generate UI with options
+                output = generate_ui_from_description(
+                    description,
+                    validate=validate,
+                    return_report=return_report and validate,
+                    multi_file=multi_file
+                )
+                
+                # Handle validation report if returned
+                validation_report = None
+                if isinstance(output, dict) and 'code' in output:
+                    code = output['code']
+                    validation_report = output.get('validation_report')
+                else:
+                    code = output
             else:
-                code = output
+                # Figma design was used
+                validation_report = None
             
             # Parse output
-            if not multi_file:
+            if not multi_file and not figma_design:
                 code_text = extract_code_from_output(code) if isinstance(code, str) else code
             else:
-                code_text = code  # Multi-file returns structured data
+                code_text = code  # Multi-file or Figma returns structured data
                 
             accessibility = extract_section(code if isinstance(code, str) else str(code), "ACCESSIBILITY REVIEW")
             design = extract_section(code if isinstance(code, str) else str(code), "DESIGN REVIEW")
@@ -475,6 +506,43 @@ def main():
         
         # Show current configuration
         st.info(f"✓ Using **{st.session_state.llm_provider}** with model **{st.session_state.llm_model}**")
+        
+        st.divider()
+        
+        # Figma Integration
+        st.header("🎨 Figma Integration")
+        
+        use_figma = st.checkbox(
+            "Import from Figma",
+            value=st.session_state.get('use_figma', False),
+            help="Extract design specifications from Figma and generate accurate Compose code",
+            key="use_figma_checkbox"
+        )
+        st.session_state.use_figma = use_figma
+        
+        if use_figma:
+            figma_token = st.text_input(
+                "Figma Access Token",
+                value=st.session_state.get('figma_token', ''),
+                type="password",
+                help="Your Figma personal access token. Get it from Figma Settings > Account > Personal Access Tokens",
+                key="figma_token_input"
+            )
+            st.session_state.figma_token = figma_token
+            
+            figma_file_key = st.text_input(
+                "Figma File Key",
+                value=st.session_state.get('figma_file_key', ''),
+                placeholder="e.g., abc123xyz from figma.com/file/abc123xyz/...",
+                help="The file key from your Figma URL",
+                key="figma_file_key_input"
+            )
+            st.session_state.figma_file_key = figma_file_key
+            
+            if figma_token and figma_file_key:
+                st.success("✓ Figma credentials configured")
+            else:
+                st.warning("⚠️ Please provide both Figma token and file key")
         
         st.divider()
         
