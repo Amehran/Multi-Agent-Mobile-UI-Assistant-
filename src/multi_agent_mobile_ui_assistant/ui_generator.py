@@ -12,6 +12,9 @@ Accessibility Reviewer → UI Reviewer → Output
 from typing import TypedDict, Annotated, Literal
 from langgraph.graph import StateGraph, END
 from langgraph.graph.message import add_messages
+from langchain_core.messages import SystemMessage, HumanMessage
+from .llm_config import get_default_llm
+import json
 
 
 class UIGeneratorState(TypedDict):
@@ -34,49 +37,75 @@ class UIGeneratorState(TypedDict):
 def intent_parser_agent(state: UIGeneratorState) -> UIGeneratorState:
     """
     Intent Parser Agent: Extracts UI elements, layout hierarchy, 
-    styles, and actions from natural language.
+    styles, and actions from natural language using LLM.
     """
     user_input = state.get("user_input", "")
     print(f"\n[Intent Parser] Analyzing: '{user_input}'")
     
-    # Parse the user input to extract UI components
-    # This is a simplified version - in production, you'd use an LLM here
-    parsed_intent = {
-        "ui_elements": [],
-        "layout_type": "Column",
-        "styles": {},
-        "actions": []
-    }
+    # Get LLM instance
+    llm = get_default_llm()
     
-    # Simple parsing logic (placeholder for LLM-based parsing)
-    if "button" in user_input.lower():
-        parsed_intent["ui_elements"].append({
-            "type": "Button",
-            "text": "Click Me",
-            "action": "onClick"
-        })
+    # Create prompt for intent parsing
+    system_prompt = """You are a UI intent parser. Extract UI components and layout information from user descriptions.
+
+Respond with a JSON object containing:
+- ui_elements: array of UI components (type, text/content, style, action)
+- layout_type: main container type (Column, Row, Card, Box, etc.)
+- styles: any specific styling requirements
+- actions: any user interactions mentioned
+
+Component types: Text, Button, Image, TextField, Icon, Divider, Spacer
+Layout types: Column, Row, Card, Box, LazyColumn, LazyRow
+
+Example input: "Create a login screen with a title, email field, password field, and login button"
+Example output:
+{
+    "ui_elements": [
+        {"type": "Text", "content": "Login", "style": "headlineLarge"},
+        {"type": "TextField", "content": "Email", "hint": "Enter your email"},
+        {"type": "TextField", "content": "Password", "hint": "Enter your password", "secure": true},
+        {"type": "Button", "text": "Login", "action": "onLogin"}
+    ],
+    "layout_type": "Column",
+    "styles": {"spacing": "medium", "alignment": "center"},
+    "actions": ["onLogin"]
+}
+
+Only return valid JSON, no additional text."""
+
+    # Call LLM
+    messages = [
+        SystemMessage(content=system_prompt),
+        HumanMessage(content=user_input)
+    ]
     
-    if "text" in user_input.lower() or "title" in user_input.lower():
-        parsed_intent["ui_elements"].append({
-            "type": "Text",
-            "content": "Sample Text",
-            "style": "headlineMedium"
-        })
+    response = llm.invoke(messages)
     
-    if "image" in user_input.lower():
-        parsed_intent["ui_elements"].append({
-            "type": "Image",
-            "description": "Sample image"
-        })
-    
-    if "card" in user_input.lower():
-        parsed_intent["layout_type"] = "Card"
-    
-    if "row" in user_input.lower():
-        parsed_intent["layout_type"] = "Row"
-    
-    print(f"[Intent Parser] Extracted {len(parsed_intent['ui_elements'])} UI elements")
-    print(f"[Intent Parser] Layout type: {parsed_intent['layout_type']}")
+    # Parse LLM response
+    try:
+        # Extract JSON from response
+        response_text = response.content
+        # Handle potential markdown code blocks
+        if "```json" in response_text:
+            response_text = response_text.split("```json")[1].split("```")[0].strip()
+        elif "```" in response_text:
+            response_text = response_text.split("```")[1].split("```")[0].strip()
+        
+        parsed_intent = json.loads(response_text)
+        print(f"[Intent Parser] Extracted {len(parsed_intent.get('ui_elements', []))} UI elements")
+        print(f"[Intent Parser] Layout type: {parsed_intent.get('layout_type', 'Column')}")
+    except (json.JSONDecodeError, IndexError, AttributeError) as e:
+        print(f"[Intent Parser] Warning: Failed to parse LLM response: {e}")
+        print(f"[Intent Parser] Response: {response.content}")
+        # Fallback to default structure
+        parsed_intent = {
+            "ui_elements": [
+                {"type": "Text", "content": "Error parsing intent", "style": "bodyLarge"}
+            ],
+            "layout_type": "Column",
+            "styles": {},
+            "actions": []
+        }
     
     return {
         "messages": [{"role": "assistant", "content": "Intent parsing complete"}],

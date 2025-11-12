@@ -2,6 +2,7 @@
 Unit tests for the UI generator module.
 """
 
+from langchain_core.messages import AIMessage
 from src.multi_agent_mobile_ui_assistant.ui_generator import (
     UIGeneratorState,
     intent_parser_agent,
@@ -18,8 +19,16 @@ from src.multi_agent_mobile_ui_assistant.ui_generator import (
 class TestIntentParserAgent:
     """Tests for the Intent Parser Agent."""
 
-    def test_intent_parser_detects_button(self):
+    def test_intent_parser_detects_button(self, mock_llm):
         """Test that intent parser detects button in user input."""
+        # Mock LLM response
+        mock_llm.invoke.return_value = AIMessage(content="""{
+            "ui_elements": [{"type": "Button", "text": "Click Me"}],
+            "layout_type": "Column",
+            "styles": {},
+            "actions": []
+        }""")
+        
         state = {
             "user_input": "Create a screen with a button",
             "messages": [],
@@ -31,8 +40,15 @@ class TestIntentParserAgent:
         assert len(result["parsed_intent"]["ui_elements"]) > 0
         assert any(el["type"] == "Button" for el in result["parsed_intent"]["ui_elements"])
 
-    def test_intent_parser_detects_text(self):
+    def test_intent_parser_detects_text(self, mock_llm):
         """Test that intent parser detects text in user input."""
+        mock_llm.invoke.return_value = AIMessage(content="""{
+            "ui_elements": [{"type": "Text", "content": "Title"}],
+            "layout_type": "Column",
+            "styles": {},
+            "actions": []
+        }""")
+        
         state = {
             "user_input": "Create a title for the page",
             "messages": [],
@@ -44,8 +60,15 @@ class TestIntentParserAgent:
         ui_elements = result["parsed_intent"]["ui_elements"]
         assert any(el["type"] == "Text" for el in ui_elements)
 
-    def test_intent_parser_detects_image(self):
+    def test_intent_parser_detects_image(self, mock_llm):
         """Test that intent parser detects image in user input."""
+        mock_llm.invoke.return_value = AIMessage(content="""{
+            "ui_elements": [{"type": "Image", "description": "Profile"}],
+            "layout_type": "Column",
+            "styles": {},
+            "actions": []
+        }""")
+        
         state = {
             "user_input": "Add an image to the screen",
             "messages": [],
@@ -56,8 +79,15 @@ class TestIntentParserAgent:
         ui_elements = result["parsed_intent"]["ui_elements"]
         assert any(el["type"] == "Image" for el in ui_elements)
 
-    def test_intent_parser_detects_card_layout(self):
+    def test_intent_parser_detects_card_layout(self, mock_llm):
         """Test that intent parser detects card layout type."""
+        mock_llm.invoke.return_value = AIMessage(content="""{
+            "ui_elements": [],
+            "layout_type": "Card",
+            "styles": {},
+            "actions": []
+        }""")
+        
         state = {
             "user_input": "Create a card with content",
             "messages": [],
@@ -67,8 +97,15 @@ class TestIntentParserAgent:
         
         assert result["parsed_intent"]["layout_type"] == "Card"
 
-    def test_intent_parser_detects_row_layout(self):
+    def test_intent_parser_detects_row_layout(self, mock_llm):
         """Test that intent parser detects row layout type."""
+        mock_llm.invoke.return_value = AIMessage(content="""{
+            "ui_elements": [],
+            "layout_type": "Row",
+            "styles": {},
+            "actions": []
+        }""")
+        
         state = {
             "user_input": "Create a row with buttons",
             "messages": [],
@@ -78,8 +115,19 @@ class TestIntentParserAgent:
         
         assert result["parsed_intent"]["layout_type"] == "Row"
 
-    def test_intent_parser_detects_multiple_elements(self):
+    def test_intent_parser_detects_multiple_elements(self, mock_llm):
         """Test that intent parser detects multiple UI elements."""
+        mock_llm.invoke.return_value = AIMessage(content="""{
+            "ui_elements": [
+                {"type": "Text", "content": "Title"},
+                {"type": "Button", "text": "Click"},
+                {"type": "Image", "description": "Hero"}
+            ],
+            "layout_type": "Column",
+            "styles": {},
+            "actions": []
+        }""")
+        
         state = {
             "user_input": "Create a screen with a title, button, and image",
             "messages": [],
@@ -90,8 +138,15 @@ class TestIntentParserAgent:
         ui_elements = result["parsed_intent"]["ui_elements"]
         assert len(ui_elements) == 3
 
-    def test_intent_parser_sets_current_step(self):
+    def test_intent_parser_sets_current_step(self, mock_llm):
         """Test that intent parser sets current_step."""
+        mock_llm.invoke.return_value = AIMessage(content="""{
+            "ui_elements": [],
+            "layout_type": "Column",
+            "styles": {},
+            "actions": []
+        }""")
+        
         state = {
             "user_input": "Test input",
             "messages": [],

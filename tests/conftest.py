@@ -5,10 +5,20 @@ Pytest configuration and shared fixtures for tests.
 import pytest
 import sys
 from pathlib import Path
+from unittest.mock import Mock, patch
 
 # Add src directory to Python path
 src_path = Path(__file__).parent.parent / "src"
 sys.path.insert(0, str(src_path))
+
+
+@pytest.fixture
+def mock_llm():
+    """Fixture providing a mocked LLM for testing without API calls."""
+    with patch('src.multi_agent_mobile_ui_assistant.ui_generator.get_default_llm') as mock:
+        mock_instance = Mock()
+        mock.return_value = mock_instance
+        yield mock_instance
 
 
 @pytest.fixture

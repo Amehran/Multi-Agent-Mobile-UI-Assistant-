@@ -60,6 +60,51 @@ uv sync
 
 This will create a virtual environment and install all dependencies.
 
+### Configure LLM Provider
+
+The system supports both **Ollama** (local) and **OpenAI** (cloud) as LLM providers.
+
+#### Option 1: Using Ollama (Local, Free)
+
+1. **Install Ollama**: Download from [ollama.ai](https://ollama.ai)
+
+2. **Pull a model**:
+```bash
+ollama pull llama3.2
+```
+
+3. **Create `.env` file**:
+```bash
+cp .env.example .env
+```
+
+4. **Configure** (`.env`):
+```env
+LLM_PROVIDER=ollama
+LLM_MODEL=llama3.2
+OLLAMA_BASE_URL=http://localhost:11434
+```
+
+#### Option 2: Using OpenAI (Cloud)
+
+1. **Get API Key**: Get your key from [platform.openai.com/api-keys](https://platform.openai.com/api-keys)
+
+2. **Create `.env` file**:
+```bash
+cp .env.example .env
+```
+
+3. **Configure** (`.env`):
+```env
+LLM_PROVIDER=openai
+LLM_MODEL=gpt-4o-mini
+OPENAI_API_KEY=your-api-key-here
+```
+
+**Available Models**:
+- Ollama: `llama3.2`, `llama3.1`, `mistral`, `codellama`, etc.
+- OpenAI: `gpt-4o`, `gpt-4o-mini`, `gpt-4`, `gpt-3.5-turbo`, etc.
+
 ## Usage
 
 ### Interactive Mode
@@ -186,6 +231,23 @@ Plus accessibility and design review feedback.
 - `langgraph>=1.0.3`: Core graph framework
 - `langchain-core>=1.0.4`: LangChain core functionality
 - `langchain-openai>=1.0.2`: OpenAI integration for LangChain
+- `langchain-ollama>=0.2.0`: Ollama integration for local LLMs
+- `python-dotenv>=1.0.0`: Environment variable management
+
+## LLM Provider Comparison
+
+| Feature | Ollama | OpenAI |
+|---------|--------|--------|
+| **Cost** | Free | Pay-per-use |
+| **Privacy** | Local, fully private | Cloud-based |
+| **Speed** | Depends on hardware | Fast |
+| **Quality** | Good (varies by model) | Excellent |
+| **Setup** | Install Ollama + models | API key only |
+| **Internet** | Not required | Required |
+
+**Recommendation**: 
+- Use **Ollama** for development, privacy, and no-cost operation
+- Use **OpenAI** for best quality and faster responses
 
 ## Testing
 
