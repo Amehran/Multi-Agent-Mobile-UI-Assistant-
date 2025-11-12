@@ -475,34 +475,53 @@ def main():
         # LLM Provider Selection
         st.header("🤖 LLM Settings")
         
-        provider_option = st.selectbox(
-            "LLM Provider",
-            options=["ollama", "openai"],
-            index=0 if st.session_state.llm_provider == "ollama" else 1,
-            help="Choose between local Ollama or OpenAI API",
-            key="llm_provider_select"
+        # Predefined LLM options
+        llm_options = {
+            "Ollama - Llama 3.2": {"provider": "ollama", "model": "llama3.2"},
+            "Ollama - CodeLlama": {"provider": "ollama", "model": "codellama"},
+            "OpenAI - GPT-4o Mini": {"provider": "openai", "model": "gpt-4o-mini"},
+            "OpenAI - GPT-4o": {"provider": "openai", "model": "gpt-4o"},
+            "OpenAI - GPT-4o Nano": {"provider": "openai", "model": "gpt-4o-nano"},
+            "Google - Gemini Pro": {"provider": "google", "model": "gemini-pro"},
+            "Custom": {"provider": "custom", "model": "custom"}
+        }
+        
+        # Find current selection
+        current_selection = "Custom"
+        for option_name, option_config in llm_options.items():
+            if (option_config["provider"] == st.session_state.llm_provider and 
+                option_config["model"] == st.session_state.llm_model):
+                current_selection = option_name
+                break
+        
+        # LLM selection dropdown
+        selected_option = st.selectbox(
+            "LLM Model",
+            options=list(llm_options.keys()),
+            index=list(llm_options.keys()).index(current_selection),
+            help="Choose your preferred LLM model",
+            key="llm_option_select"
         )
         
-        # Update session state if changed
-        if provider_option != st.session_state.llm_provider:
-            st.session_state.llm_provider = provider_option
-            # Update default model based on provider
-            if provider_option == "ollama":
-                st.session_state.llm_model = "llama3.2"
-            else:
-                st.session_state.llm_model = "gpt-4o-mini"
-        
-        # Model selection
-        model_name = st.text_input(
-            "Model Name",
-            value=st.session_state.llm_model,
-            help="For Ollama: llama3.2, codellama, etc.\nFor OpenAI: gpt-4o-mini, gpt-4, gpt-3.5-turbo, etc.",
-            key="llm_model_input"
-        )
-        
-        # Update session state if changed
-        if model_name != st.session_state.llm_model:
-            st.session_state.llm_model = model_name
+        # Update session state based on selection
+        if selected_option != "Custom":
+            config = llm_options[selected_option]
+            st.session_state.llm_provider = config["provider"]
+            st.session_state.llm_model = config["model"]
+        else:
+            # Show custom input fields
+            st.session_state.llm_provider = st.text_input(
+                "Provider",
+                value=st.session_state.get('llm_provider', 'ollama'),
+                help="e.g., ollama, openai, google",
+                key="custom_provider_input"
+            )
+            st.session_state.llm_model = st.text_input(
+                "Model Name",
+                value=st.session_state.get('llm_model', 'llama3.2'),
+                help="Enter the model name",
+                key="custom_model_input"
+            )
         
         # Show current configuration
         st.info(f"✓ Using **{st.session_state.llm_provider}** with model **{st.session_state.llm_model}**")
