@@ -172,15 +172,18 @@ Given the current code and user feedback, produce an improved version that addre
 - Accessibility best practices
 - Clean, readable code
 
-Respond with a JSON object containing:
+IMPORTANT: Return ONLY a valid JSON object. The "refined_code" field must have all newlines and quotes properly escaped.
+Use \\n for newlines and \\" for quotes inside the code string.
+
+Respond with this exact JSON structure:
 {
-    "refined_code": "the complete improved @Composable function",
-    "changes_made": ["list of improvements made"],
-    "accessibility_notes": ["accessibility improvements"],
-    "design_notes": ["design improvements"]
+    "refined_code": "the complete improved @Composable function with \\n for newlines",
+    "changes_made": ["improvement 1", "improvement 2"],
+    "accessibility_notes": ["note 1", "note 2"],
+    "design_notes": ["note 1", "note 2"]
 }
 
-Only return valid JSON, no additional text."""
+Do not include any text before or after the JSON object."""
 
             user_message = f"""Current Code:
 ```kotlin
@@ -200,19 +203,56 @@ Please refine the code based on this feedback."""
             
             response = llm.invoke(messages)
             
-            # Parse response
+            # Parse response with better error handling
             response_text = response.content
+            
+            # Extract JSON from markdown code blocks
             if "```json" in response_text:
                 response_text = response_text.split("```json")[1].split("```")[0].strip()
             elif "```" in response_text:
                 response_text = response_text.split("```")[1].split("```")[0].strip()
             
-            result = json.loads(response_text)
-            
-            refined_code = result.get("refined_code", st.session_state.current_code)
-            changes = result.get("changes_made", [])
-            accessibility_notes = result.get("accessibility_notes", [])
-            design_notes = result.get("design_notes", [])
+            # Try to parse JSON with strict=False to handle control characters
+            try:
+                result = json.loads(response_text, strict=False)
+            except json.JSONDecodeError as e:
+                # If JSON parsing fails, try to extract code manually
+                st.warning(f"JSON parsing issue: {str(e)}. Attempting to extract code...")
+                
+                # Fallback: look for code between quotes or just use original
+                if '"refined_code"' in response_text:
+                    # Try to extract the code section manually
+                    try:
+                        # Find the refined_code field and extract until the next field
+                        code_start = response_text.find('"refined_code"')
+                        code_section = response_text[code_start:]
+                        # Find the opening quote after the colon
+                        first_quote = code_section.find('"', code_section.find(':'))
+                        # Find the closing quote (accounting for escaped quotes)
+                        code_content = ""
+                        i = first_quote + 1
+                        while i < len(code_section):
+                            if code_section[i] == '"' and (i == 0 or code_section[i-1] != '\\'):
+                                break
+                            code_content += code_section[i]
+                            i += 1
+                        
+                        refined_code = code_content.replace('\\n', '\n').replace('\\"', '"')
+                        changes = ["Code refined based on your feedback"]
+                        accessibility_notes = ["Please review accessibility manually"]
+                        design_notes = ["Please review design manually"]
+                    except Exception as extract_error:
+                        st.error(f"Could not extract refined code: {str(extract_error)}")
+                        return
+                else:
+                    st.error("Could not parse LLM response. Please try again with different feedback.")
+                    return
+            else:
+                # Successfully parsed JSON
+                refined_code = result.get("refined_code", st.session_state.current_code)
+                changes = result.get("changes_made", [])
+                accessibility_notes = result.get("accessibility_notes", [])
+                design_notes = result.get("design_notes", [])
             
             # Format reviews
             accessibility_review = "**Improvements Made:**\n" + "\n".join([f"• {note}" for note in accessibility_notes])
