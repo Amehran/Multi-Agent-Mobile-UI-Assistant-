@@ -162,49 +162,371 @@ def layout_planner_agent(state: UIGeneratorState) -> UIGeneratorState:
 def ui_generator_agent(state: UIGeneratorState) -> UIGeneratorState:
     """
     UI Generator Agent: Generates actual Jetpack Compose code
-    from the layout plan, enriched with GitHub examples if available.
+    from the layout plan using LLM, enriched with GitHub examples if available.
     """
     layout_plan = state.get("layout_plan", {})
+    parsed_intent = state.get("parsed_intent", {})
+    user_input = state.get("user_input", "")
     github_examples = state.get("github_examples", [])
     project_context = state.get("project_context", {})
+    use_llm = state.get("use_llm_generation", True)  # Default to True for production
     
-    print(f"\n[UI Generator] Generating Jetpack Compose code...")
+    print("\n[UI Generator] Generating Jetpack Compose code...")
     
-    # If we have GitHub examples, use them as reference
-    if github_examples:
-        print(f"[UI Generator] Using {len(github_examples)} GitHub examples as reference")
-        # For now, log that we have examples (full integration in next iteration)
-        for example in github_examples[:2]:  # Show first 2
-            print(f"  - Example: {example.description}")
+    # If LLM is disabled (for testing), use fallback
+    if not use_llm:
+        print("[UI Generator] Using fallback template generation (testing mode)")
+        generated_code = _generate_template_code(layout_plan)
+    else:
+        # Build context for LLM
+        context_parts = []
+        
+        # Add GitHub examples if available
+        if github_examples:
+            print(f"[UI Generator] Using {len(github_examples)} GitHub examples as reference")
+            context_parts.append("Here are some real Jetpack Compose examples for reference:")
+            for i, example in enumerate(github_examples[:3], 1):
+                context_parts.append(f"\nExample {i}: {example.description}")
+                context_parts.append(f"```kotlin\n{example.code[:500]}...\n```")
+        
+        # Add project context if available
+        if project_context.get("existing_composables"):
+            print(f"[UI Generator] Found {len(project_context['existing_composables'])} existing composables")
+            context_parts.append(f"\nExisting composables in project: {', '.join(project_context['existing_composables'][:5])}")
+        
+        # Create detailed prompt for LLM
+        system_prompt = """You are an expert Jetpack Compose developer. Generate complete, production-ready Compose code.
+
+CRITICAL RULES - FOLLOW EXACTLY:
+1. Generate ONLY valid Kotlin Jetpack Compose code
+2. Use Material3 components (androidx.compose.material3.*)
+3. Include ALL necessary imports at the top
+4. Use proper modifiers in THIS ORDER: .fillMaxWidth() THEN .padding() THEN .height()
+5. For TextFields, ALWAYS use OutlinedTextField with:
+   - var state by remember { mutableStateOf("") }
+   - value = state
+   - onValueChange = { state = it }
+   - label = { Text("Label") }
+   - placeholder = { Text("Hint text") }
+6. For spacing, ALWAYS use: Spacer(modifier = Modifier.height(XYdp))
+7. Use proper typography: MaterialTheme.typography.headlineLarge, bodyMedium, etc.
+8. For buttons: Button(onClick = {}, modifier = Modifier.fillMaxWidth().height(48.dp))
+9. Use Column with: verticalArrangement = Arrangement.Top, horizontalAlignment = Alignment.CenterHorizontally
+10. For password fields: visualTransformation = PasswordVisualTransformation()
+11. For icons: use Icon(imageVector = Icons.Default.IconName, contentDescription = "...")
+12. For dividers with text: Use Row with HorizontalDivider and Text
+13. MATCH THE EXACT COMPONENT COUNT: If user specifies 18 components, generate exactly 18 components
+14. PRESERVE EXACT SPACING: Use the exact dp values specified (24dp, 32dp, 16dp, 8dp)
+15. For images/logos: Use Icon() or Box() with specified size
+
+EXAMPLE STRUCTURE FOR LOGIN SCREEN:
+```kotlin
+@Composable
+fun LoginScreen() {
+    var email by remember { mutableStateOf("") }
+    var password by remember { mutableStateOf("") }
+    var passwordVisible by remember { mutableStateOf(false) }
     
-    # If we have project context, consider existing composables
-    if project_context.get("existing_composables"):
-        print(f"[UI Generator] Found {len(project_context['existing_composables'])} existing composables")
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Top
+    ) {
+        // Logo
+        Icon(
+            imageVector = Icons.Default.AccountCircle,
+            contentDescription = "Logo",
+            modifier = Modifier.size(80.dp)
+        )
+        
+        Spacer(modifier = Modifier.height(24.dp))
+        
+        // Title
+        Text(
+            text = "Welcome Back",
+            style = MaterialTheme.typography.headlineLarge,
+            fontWeight = FontWeight.Bold
+        )
+        
+        // Email TextField
+        OutlinedTextField(
+            value = email,
+            onValueChange = { email = it },
+            label = { Text("Email") },
+            placeholder = { Text("Enter your email") },
+            modifier = Modifier.fillMaxWidth()
+        )
+        
+        // More components...
+    }
+}
+```
+
+Generate code that EXACTLY matches the user's specifications."""
+
+        # Build user message with all context
+        user_message_parts = [
+            "=== USER'S EXACT REQUIREMENTS ===",
+            f"{user_input}",
+            f"\n=== YOUR TASK ===",
+            f"Generate Jetpack Compose code that implements EVERY SINGLE ITEM listed above.",
+            f"You MUST include ALL {len(parsed_intent.get('ui_elements', []))} components mentioned.",
+            f"\n=== MANDATORY CODE STRUCTURE ===",
+        ]
+        
+        # Add step-by-step component generation instructions
+        user_message_parts.append("\n1. START WITH THESE IMPORTS (copy exactly):")
+        user_message_parts.append("""
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
+""")
+        
+        user_message_parts.append("\n2. FUNCTION SIGNATURE:")
+        user_message_parts.append("@Composable\nfun LoginScreen() {")
+        
+        user_message_parts.append("\n3. STATE VARIABLES (declare ALL text fields):")
+        user_message_parts.append("For EACH TextField in the requirements, add:")
+        user_message_parts.append("    var fieldName by remember { mutableStateOf(\"\") }")
+        user_message_parts.append("Example: var email by remember { mutableStateOf(\"\") }")
+        user_message_parts.append("Example: var password by remember { mutableStateOf(\"\") }")
+        user_message_parts.append("Example: var passwordVisible by remember { mutableStateOf(false) }")
+        
+        user_message_parts.append(f"\n4. MAIN CONTAINER - {layout_plan.get('root_container', 'Column')}:")
+        user_message_parts.append("""    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Top
+    ) {""")
+        
+        user_message_parts.append("\n5. IMPLEMENT EACH COMPONENT FROM USER'S LIST:")
+        user_message_parts.append("Go through EACH numbered item in the user requirements above and generate code.")
+        user_message_parts.append("\nCOMPONENT PATTERNS TO USE:")
+        
+        user_message_parts.append("""
+• Logo/Icon: Icon(imageVector = Icons.Default.AccountCircle, contentDescription = "Logo", modifier = Modifier.size(80.dp))
+• Spacing: Spacer(modifier = Modifier.height(24.dp))  ← Use EXACT dp value from requirements
+• Title Text: Text(text = "Welcome Back", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold)
+• Subtitle: Text(text = "Sign in to continue", style = MaterialTheme.typography.bodyMedium, color = Color.Gray)
+• Email Field:
+    OutlinedTextField(
+        value = email,
+        onValueChange = { email = it },
+        label = { Text("Email") },
+        placeholder = { Text("Enter your email") },
+        modifier = Modifier.fillMaxWidth()
+    )
+• Password Field:
+    OutlinedTextField(
+        value = password,
+        onValueChange = { password = it },
+        label = { Text("Password") },
+        placeholder = { Text("Enter your password") },
+        visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+        trailingIcon = {
+            IconButton(onClick = { passwordVisible = !passwordVisible }) {
+                Icon(imageVector = if (passwordVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff, contentDescription = "Toggle")
+            }
+        },
+        modifier = Modifier.fillMaxWidth()
+    )
+• Clickable Text: Text(text = "Forgot Password?", modifier = Modifier.fillMaxWidth().clickable { }, textAlign = TextAlign.End, style = MaterialTheme.typography.bodySmall)
+• Button:
+    Button(
+        onClick = { },
+        modifier = Modifier.fillMaxWidth().height(48.dp),
+        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+    ) {
+        Text("Sign In", color = Color.White)
+    }
+• Outlined Button:
+    OutlinedButton(
+        onClick = { },
+        modifier = Modifier.fillMaxWidth().height(48.dp)
+    ) {
+        Icon(imageVector = Icons.Default.Google, contentDescription = null)
+        Spacer(modifier = Modifier.width(8.dp))
+        Text("Continue with Google")
+    }
+• Divider with Text:
+    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+        HorizontalDivider(modifier = Modifier.weight(1f))
+        Text("OR", modifier = Modifier.padding(horizontal = 8.dp))
+        HorizontalDivider(modifier = Modifier.weight(1f))
+    }
+• Sign Up Row:
+    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+        Text("Don't have an account? ")
+        Text("Sign Up", color = MaterialTheme.colorScheme.primary, modifier = Modifier.clickable { })
+    }
+""")
+        
+        user_message_parts.append("\n6. CLOSE THE FUNCTION:")
+        user_message_parts.append("    }\n}")
+        
+        user_message_parts.append(f"\n\n=== CRITICAL CHECKLIST ===")
+        user_message_parts.append(f"☐ Did you include ALL {len(parsed_intent.get('ui_elements', []))} components?")
+        user_message_parts.append("☐ Did you use the EXACT spacing values (24dp, 32dp, 16dp, 8dp)?")
+        user_message_parts.append("☐ Did you use OutlinedTextField (not Text) for input fields?")
+        user_message_parts.append("☐ Did you add password visibility toggle?")
+        user_message_parts.append("☐ Did you make clickable texts clickable with .clickable { }?")
+        user_message_parts.append("☐ Did you use .fillMaxWidth() for buttons and fields?")
+        user_message_parts.append("☐ Did you match ALL text labels exactly?")
+        
+        if context_parts:
+            user_message_parts.append("\n=== REFERENCE EXAMPLES ===")
+            user_message_parts.append("\n".join(context_parts))
+        
+        user_message_parts.append("\n\n=== OUTPUT FORMAT ===")
+        user_message_parts.append("Return ONLY the complete Kotlin code. Start with imports, end with closing brace. NO explanations, NO markdown fences.")
+        
+        user_message = "\n".join(user_message_parts)
+        
+        # Call LLM to generate code
+        from langchain_core.messages import SystemMessage, HumanMessage
+        from .llm_config import get_default_llm
+        
+        llm = get_default_llm()
+        messages = [
+            SystemMessage(content=system_prompt),
+            HumanMessage(content=user_message)
+        ]
+        
+        try:
+            response = llm.invoke(messages)
+            generated_code = response.content.strip()
+            
+            print(f"[UI Generator] Raw LLM response length: {len(generated_code)} chars")
+            
+            # Clean up the response - extract code if wrapped in markdown
+            if "```kotlin" in generated_code:
+                print("[UI Generator] Extracting from kotlin markdown block")
+                generated_code = generated_code.split("```kotlin")[1].split("```")[0].strip()
+            elif "```java" in generated_code:
+                print("[UI Generator] Extracting from java markdown block")
+                generated_code = generated_code.split("```java")[1].split("```")[0].strip()
+            elif "```" in generated_code:
+                print("[UI Generator] Extracting from generic markdown block")
+                # Find first code block
+                parts = generated_code.split("```")
+                if len(parts) >= 3:
+                    # Take the content between first pair of ```
+                    generated_code = parts[1].strip()
+                    # Remove language identifier if present
+                    if "\n" in generated_code:
+                        lines = generated_code.split("\n")
+                        # Check if first line is a language identifier
+                        if lines[0].strip() in ["kotlin", "java", "kt"]:
+                            generated_code = "\n".join(lines[1:])
+            
+            # Remove any leading/trailing whitespace
+            generated_code = generated_code.strip()
+            
+            # Ensure it starts with imports or @Composable
+            if not generated_code.startswith("import") and not generated_code.startswith("@Composable"):
+                print("[UI Generator] Code doesn't start with imports, adding them")
+                # Add necessary imports
+                imports = [
+                    "import androidx.compose.runtime.Composable",
+                    "import androidx.compose.ui.Modifier",
+                    "import androidx.compose.material3.*",
+                    "import androidx.compose.foundation.layout.*",
+                    "import androidx.compose.foundation.clickable",
+                    "import androidx.compose.material.icons.Icons",
+                    "import androidx.compose.material.icons.filled.*",
+                    "import androidx.compose.ui.unit.dp",
+                    "import androidx.compose.runtime.remember",
+                    "import androidx.compose.runtime.mutableStateOf",
+                    "import androidx.compose.runtime.getValue",
+                    "import androidx.compose.runtime.setValue",
+                    "import androidx.compose.ui.Alignment",
+                    "import androidx.compose.ui.graphics.Color",
+                    "import androidx.compose.ui.text.font.FontWeight",
+                    "import androidx.compose.ui.text.input.PasswordVisualTransformation",
+                    "import androidx.compose.ui.text.input.VisualTransformation",
+                    "import androidx.compose.ui.text.style.TextAlign",
+                    ""
+                ]
+                generated_code = "\n".join(imports) + "\n" + generated_code
+            
+            print(f"[UI Generator] Generated {len(generated_code.split(chr(10)))} lines of code using LLM")
+            
+        except Exception as e:
+            print(f"[UI Generator] LLM generation failed: {e}, falling back to template")
+            # Fallback to basic template if LLM fails
+            generated_code = _generate_template_code(layout_plan)
     
-    # Generate the Compose code
+    # Apply validation if requested
+    if state.get("validate_code"):
+        from .android_tools_mcp import AndroidLintMCP
+        
+        print("[UI Generator] Applying validation and auto-fix...")
+        lint_mcp = AndroidLintMCP()
+        generated_code = lint_mcp.auto_fix(generated_code)
+        print("[UI Generator] Code validated and auto-fixed")
+    
+    return {
+        "messages": [{"role": "assistant", "content": "UI code generation complete"}],
+        "generated_code": generated_code,
+        "current_step": "code_generated"
+    }
+
+
+def _generate_template_code(layout_plan: dict) -> str:
+    """Generate code using template-based approach (for testing or fallback)."""
     code_lines = [
+        "import androidx.compose.runtime.Composable",
+        "import androidx.compose.ui.Modifier",
+        "import androidx.compose.material3.*",
+        "import androidx.compose.foundation.layout.*",
+        "import androidx.compose.foundation.background",
+        "import androidx.compose.ui.graphics.Color",
+        "import androidx.compose.ui.unit.dp",
+        "import androidx.compose.ui.Alignment",
+        "",
         "@Composable",
         "fun GeneratedUI() {",
     ]
     
     # Add root container
     root = layout_plan.get("root_container", "Column")
-    modifiers = ", ".join([f"modifier = Modifier.{mod}" for mod in layout_plan.get("modifiers", [])])
+    modifiers = layout_plan.get("modifiers", [])
     
     if root == "Column":
         arrangement = layout_plan.get("arrangement", "Center")
         code_lines.append(f"    {root}(")
-        code_lines.append(f"        {modifiers},")
+        if modifiers:
+            code_lines.append(f"        modifier = Modifier.{'.'.join(modifiers)},")
         code_lines.append(f"        verticalArrangement = Arrangement.{arrangement},")
         code_lines.append(f"        horizontalAlignment = Alignment.CenterHorizontally")
         code_lines.append(f"    ) {{")
     elif root == "Row":
         code_lines.append(f"    {root}(")
-        code_lines.append(f"        {modifiers},")
+        if modifiers:
+            code_lines.append(f"        modifier = Modifier.{'.'.join(modifiers)},")
         code_lines.append(f"        horizontalArrangement = Arrangement.SpaceBetween")
         code_lines.append(f"    ) {{")
     else:
-        code_lines.append(f"    {root}({modifiers}) {{")
+        if modifiers:
+            code_lines.append(f"    {root}(modifier = Modifier.{'.'.join(modifiers)}) {{")
+        else:
+            code_lines.append(f"    {root}() {{")
     
     # Add children components
     for child in layout_plan.get("children", []):
@@ -231,31 +553,18 @@ def ui_generator_agent(state: UIGeneratorState) -> UIGeneratorState:
             code_lines.append(f"        Box(")
             code_lines.append(f"            modifier = Modifier")
             code_lines.append(f"                .size(200.dp)")
-            code_lines.append(f"                .background(Color.LightGray),")
-            code_lines.append(f'            contentDescription = "{description}"')
+            code_lines.append(f"                .background(Color.LightGray)")
             code_lines.append(f"        )")
     
     code_lines.append(f"    }}")
     code_lines.append(f"}}")
     
-    generated_code = "\n".join(code_lines)
-    
-    print(f"[UI Generator] Generated {len(code_lines)} lines of code")
-    
-    # Apply validation if requested
-    if state.get("validate_code"):
-        from .android_tools_mcp import AndroidLintMCP
-        
-        print("[UI Generator] Applying validation and auto-fix...")
-        lint_mcp = AndroidLintMCP()
-        generated_code = lint_mcp.auto_fix(generated_code)
-        print("[UI Generator] Code validated and auto-fixed")
-    
-    return {
-        "messages": [{"role": "assistant", "content": "UI code generation complete"}],
-        "generated_code": generated_code,
-        "current_step": "code_generated"
-    }
+    return "\n".join(code_lines)
+
+
+def _generate_fallback_code(layout_plan: dict) -> str:
+    """Generate basic fallback code if LLM fails (deprecated - use _generate_template_code)."""
+    return _generate_template_code(layout_plan)
 
 
 # ============================================================================
