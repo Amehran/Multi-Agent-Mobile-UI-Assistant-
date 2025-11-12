@@ -129,32 +129,58 @@ def generate_initial_ui(description: str):
     
     with st.spinner("🔮 Generating UI code..."):
         try:
-            # Generate UI
-            output = generate_ui_from_description(description)
+            # Get options from session state
+            validate = st.session_state.get('validate_code', True)
+            return_report = st.session_state.get('show_validation_report', False)
+            multi_file = st.session_state.get('multi_file', False)
+            
+            # Generate UI with options
+            output = generate_ui_from_description(
+                description,
+                validate=validate,
+                return_report=return_report and validate,
+                multi_file=multi_file
+            )
+            
+            # Handle validation report if returned
+            validation_report = None
+            if isinstance(output, dict) and 'code' in output:
+                code = output['code']
+                validation_report = output.get('validation_report')
+            else:
+                code = output
             
             # Parse output
-            code = extract_code_from_output(output)
-            accessibility = extract_section(output, "ACCESSIBILITY REVIEW")
-            design = extract_section(output, "DESIGN REVIEW")
+            if not multi_file:
+                code_text = extract_code_from_output(code) if isinstance(code, str) else code
+            else:
+                code_text = code  # Multi-file returns structured data
+                
+            accessibility = extract_section(code if isinstance(code, str) else str(code), "ACCESSIBILITY REVIEW")
+            design = extract_section(code if isinstance(code, str) else str(code), "DESIGN REVIEW")
             
             # Update session state
-            st.session_state.current_code = code
+            st.session_state.current_code = code_text
             st.session_state.current_accessibility = accessibility
             st.session_state.current_design = design
             st.session_state.iteration_count += 1
+            st.session_state.validation_report = validation_report
             
             # Add to history
             st.session_state.history.append({
                 "iteration": st.session_state.iteration_count,
                 "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 "description": description,
-                "code": code,
+                "code": code_text,
                 "accessibility": accessibility,
                 "design": design,
-                "feedback": ""
+                "feedback": "",
+                "validation_report": validation_report
             })
             
             st.success("✅ UI generated successfully!")
+            if validate and validation_report:
+                st.info("🔍 Code validation completed - check the Validation Report tab")
             st.rerun()
             
         except Exception as e:
@@ -452,6 +478,39 @@ def main():
         
         st.divider()
         
+        # Advanced Options
+        st.header("⚙️ Advanced Options")
+        
+        # Multi-file project generation
+        multi_file = st.checkbox(
+            "Multi-file Project",
+            value=st.session_state.get('multi_file', False),
+            help="Generate a complete project structure with separate files for each component",
+            key="multi_file_checkbox"
+        )
+        st.session_state.multi_file = multi_file
+        
+        # Validation and auto-fix
+        validate_code = st.checkbox(
+            "Code Validation & Auto-fix",
+            value=st.session_state.get('validate_code', True),
+            help="Automatically validate generated code and fix common issues like missing imports",
+            key="validate_checkbox"
+        )
+        st.session_state.validate_code = validate_code
+        
+        # Show validation report
+        show_validation_report = st.checkbox(
+            "Show Validation Report",
+            value=st.session_state.get('show_validation_report', False),
+            help="Display detailed validation report including lint issues and compilation checks",
+            key="validation_report_checkbox",
+            disabled=not validate_code
+        )
+        st.session_state.show_validation_report = show_validation_report
+        
+        st.divider()
+        
         st.header("📋 How It Works")
         st.markdown("""
         1. **Describe** your UI in plain English
@@ -540,10 +599,15 @@ def main():
         if st.session_state.current_code:
             st.header("💻 Generated Code")
             
-            # Create tabs for Code and Preview
-            code_tab, preview_tab = st.tabs(["📝 Code", "👁️ Preview"])
+            # Create tabs for Code, Preview, and Validation
+            tabs = ["📝 Code", "👁️ Preview"]
+            if st.session_state.get('validation_report'):
+                tabs.append("🔍 Validation Report")
             
-            with code_tab:
+            tab_objects = st.tabs(tabs)
+            
+            # Code tab
+            with tab_objects[0]:
                 # Code display
                 st.code(st.session_state.current_code, language="kotlin", line_numbers=True)
                 
@@ -555,7 +619,8 @@ def main():
                     mime="text/plain"
                 )
             
-            with preview_tab:
+            # Preview tab
+            with tab_objects[1]:
                 st.markdown("### Visual Structure Preview")
                 st.markdown("*This is a visual representation of your UI layout hierarchy*")
                 
@@ -564,6 +629,49 @@ def main():
                 st.markdown(preview_html, unsafe_allow_html=True)
                 
                 st.info("💡 **Tip:** This preview shows the structure and hierarchy of your UI components. For a real preview, copy the code into Android Studio.")
+            
+            # Validation Report tab (if available)
+            if st.session_state.get('validation_report'):
+                with tab_objects[2]:
+                    st.markdown("### 🔍 Validation Report")
+                    st.markdown("*Automated code quality and compilation checks*")
+                    
+                    report = st.session_state.validation_report
+                    
+                    # Lint Issues
+                    st.subheader("📋 Lint Issues")
+                    lint_issues = report.get('lint_issues', [])
+                    if lint_issues:
+                        for issue in lint_issues:
+                            severity = issue.get('severity', 'info')
+                            icon = "🔴" if severity == "error" else "🟡" if severity == "warning" else "🔵"
+                            st.markdown(f"{icon} **{issue.get('message', 'Unknown issue')}**")
+                            if issue.get('line'):
+                                st.caption(f"Line {issue['line']}")
+                    else:
+                        st.success("✅ No lint issues found!")
+                    
+                    st.divider()
+                    
+                    # Compilation Check
+                    st.subheader("🔨 Compilation Check")
+                    compilation = report.get('compilation', {})
+                    if compilation.get('success'):
+                        st.success("✅ Code compiles successfully!")
+                    else:
+                        st.error("❌ Compilation failed")
+                        errors = compilation.get('errors', [])
+                        for error in errors:
+                            st.code(error, language="text")
+                    
+                    st.divider()
+                    
+                    # Auto-fixes Applied
+                    if report.get('auto_fixes'):
+                        st.subheader("🔧 Auto-fixes Applied")
+                        st.info(f"Applied {len(report['auto_fixes'])} automatic fixes to the code")
+                        for fix in report['auto_fixes']:
+                            st.markdown(f"• {fix}")
             
             st.divider()
             
