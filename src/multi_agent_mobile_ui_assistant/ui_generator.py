@@ -31,6 +31,7 @@ class UIGeneratorState(TypedDict):
     github_examples: list  # MCP: GitHub examples for context
     project_context: dict  # MCP: Existing project info
     multi_file: bool  # MCP: Generate multiple files
+    validate_code: bool  # Android Tools MCP: Run validation
 
 
 # ============================================================================
@@ -241,6 +242,15 @@ def ui_generator_agent(state: UIGeneratorState) -> UIGeneratorState:
     
     print(f"[UI Generator] Generated {len(code_lines)} lines of code")
     
+    # Apply validation if requested
+    if state.get("validate_code"):
+        from .android_tools_mcp import AndroidLintMCP
+        
+        print("[UI Generator] Applying validation and auto-fix...")
+        lint_mcp = AndroidLintMCP()
+        generated_code = lint_mcp.auto_fix(generated_code)
+        print("[UI Generator] Code validated and auto-fixed")
+    
     return {
         "messages": [{"role": "assistant", "content": "UI code generation complete"}],
         "generated_code": generated_code,
@@ -427,7 +437,9 @@ def generate_ui_from_description(
     user_description: str,
     github_examples: list = None,
     project_context: dict = None,
-    multi_file: bool = False
+    multi_file: bool = False,
+    validate: bool = False,
+    return_report: bool = False
 ) -> str | dict:
     """
     Generate Jetpack Compose UI code from a natural language description.
@@ -437,9 +449,11 @@ def generate_ui_from_description(
         github_examples: Optional list of ComposeExample from GitHub for context
         project_context: Optional dict with existing project structure info
         multi_file: If True, return dict with multiple files; if False, return single file string
+        validate: If True, run Android Tools MCP validation and auto-fix
+        return_report: If True, return dict with code and validation report
         
     Returns:
-        Final output with generated code and reviews (str or dict based on multi_file)
+        Final output with generated code and reviews (str or dict based on multi_file/return_report)
     """
     print("=" * 70)
     print("JETPACK COMPOSE UI GENERATOR")
@@ -451,6 +465,8 @@ def generate_ui_from_description(
         print(f"Using {len(github_examples)} GitHub examples for context")
     if project_context:
         print(f"Using project context with {len(project_context.get('existing_composables', []))} existing composables")
+    if validate:
+        print("Validation enabled: Will run Android Tools MCP checks")
     
     # Build the graph
     workflow = build_ui_generator_graph()
@@ -469,11 +485,69 @@ def generate_ui_from_description(
         "current_step": "start",
         "github_examples": github_examples or [],
         "project_context": project_context or {},
-        "multi_file": multi_file
+        "multi_file": multi_file,
+        "validate_code": validate
     }
     
     # Execute the workflow
     result = app.invoke(initial_state)
+    
+    # Get the output
+    final_output = result.get("final_output", "")
+    generated_code = result.get("generated_code", "")
+    
+    # Apply validation if requested
+    if validate:
+        from .android_tools_mcp import AndroidLintMCP, GradleMCP
+        
+        print("\n[Validation] Running Android Tools MCP checks...")
+        lint_mcp = AndroidLintMCP()
+        gradle_mcp = GradleMCP()
+        
+        # Extract code from final output
+        code_to_validate = generated_code if generated_code else final_output
+        
+        # Run lint validation
+        lint_issues = lint_mcp.validate_compose_code(code_to_validate)
+        print(f"[Validation] Found {len(lint_issues)} lint issues")
+        
+        # Auto-fix if issues found
+        if lint_issues:
+            print("[Validation] Applying auto-fix...")
+            fixed_code = lint_mcp.auto_fix(code_to_validate)
+        else:
+            fixed_code = code_to_validate
+        
+        # Check compilation
+        compilation_result = gradle_mcp.check_compilation(fixed_code)
+        print(f"[Validation] Compilation: {'SUCCESS' if compilation_result.success else 'FAILED'}")
+        
+        # Update output with fixed code
+        final_output = fixed_code
+        
+        # Return with report if requested
+        if return_report:
+            return {
+                "code": fixed_code,
+                "validation_report": {
+                    "lint_issues": [
+                        {
+                            "severity": issue.severity,
+                            "message": issue.message,
+                            "line": issue.line,
+                            "suggestion": issue.suggestion
+                        }
+                        for issue in lint_issues
+                    ],
+                    "lint_issues_count": len(lint_issues),
+                    "auto_fixed": len(lint_issues) > 0,
+                    "compilation": {
+                        "success": compilation_result.success,
+                        "errors": compilation_result.errors,
+                        "warnings": compilation_result.warnings
+                    }
+                }
+            }
     
     # Return based on multi_file flag
     if multi_file:

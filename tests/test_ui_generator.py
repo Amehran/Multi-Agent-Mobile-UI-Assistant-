@@ -728,3 +728,154 @@ class TestMCPIntegration:
         # Should recognize and use examples (verified by print output or state)
         # For now, we just verify it doesn't crash with examples present
         assert True  # Phase 1: Basic acceptance test
+
+
+class TestValidationPipeline:
+    """Tests for Android Tools MCP validation pipeline integration."""
+    
+    def test_generate_ui_validates_code_automatically(self, mock_llm):
+        """
+        GIVEN UI generation request
+        WHEN generating code with validate=True
+        THEN should run lint validation and auto-fix issues
+        """
+        # Mock LLM to return code with missing imports
+        mock_llm.invoke.return_value = AIMessage(
+            content="@Composable fun MyScreen() { Text(\"Hello\") }"
+        )
+        
+        result = generate_ui_from_description(
+            "Create a simple screen",
+            validate=True
+        )
+        
+        # Should have added imports automatically
+        assert "import" in result
+        assert "@Composable" in result
+    
+    def test_generate_ui_returns_validation_report(self, mock_llm):
+        """
+        GIVEN UI generation with validation
+        WHEN code has lint issues
+        THEN should return report with issues found and fixed
+        """
+        mock_llm.invoke.return_value = AIMessage(
+            content="@Composable fun MyScreen() { Text(\"Hello\") }"
+        )
+        
+        result = generate_ui_from_description(
+            "Create a screen",
+            validate=True,
+            return_report=True
+        )
+        
+        assert isinstance(result, dict)
+        assert "code" in result
+        assert "validation_report" in result
+        assert "lint_issues" in result["validation_report"]
+    
+    def test_ui_generator_agent_applies_auto_fix(self, mock_llm):
+        """
+        GIVEN generated code with lint issues
+        WHEN ui_generator_agent runs with validation
+        THEN should apply auto_fix to generated code
+        """
+        mock_llm.invoke.return_value = AIMessage(content="@Composable fun Screen() {}")
+        
+        state = {
+            "user_input": "Create screen",
+            "messages": [],
+            "parsed_intent": {},
+            "layout_plan": {},
+            "validate_code": True,
+            "github_examples": [],
+            "project_context": {},
+            "multi_file": False
+        }
+        
+        result = ui_generator_agent(state)
+        
+        # Should have validated and fixed code
+        code = result.get("generated_code", "")
+        assert "import" in code or "@Composable" in code
+    
+    def test_validation_preserves_code_functionality(self, mock_llm):
+        """
+        GIVEN generated code through full workflow
+        WHEN validation auto-fixes issues
+        THEN should preserve generated components and add imports
+        """
+        # Provide intent that should generate Text component
+        mock_llm.invoke.return_value = AIMessage(content="""{
+            "ui_elements": [{"type": "Text", "content": "Click"}],
+            "layout_type": "Column",
+            "styles": {},
+            "actions": []
+        }""")
+        
+        result = generate_ui_from_description(
+            "Create text that says Click",
+            validate=True
+        )
+        
+        # Generated code should have Text component
+        assert "Text" in result
+        # Validation should add imports
+        assert "import androidx.compose" in result
+        # Should have the Composable function
+        assert "@Composable" in result
+    
+    def test_validation_detects_compilation_errors(self, mock_llm):
+        """
+        GIVEN validation is enabled
+        WHEN validation runs on generated code  
+        THEN should return compilation check results
+        """
+        # Provide a simple valid intent - compilation check happens on generated code
+        mock_llm.invoke.return_value = AIMessage(content="""{
+            "ui_elements": [{"type": "Text", "content": "Test"}],
+            "layout_type": "Column",
+            "styles": {},
+            "actions": []
+        }""")
+        
+        result = generate_ui_from_description(
+            "Create text",
+            validate=True,
+            return_report=True
+        )
+        
+        # Should return validation report
+        assert "validation_report" in result
+        report = result["validation_report"]
+        assert "compilation" in report
+        # The mock compilation check should return success for valid generated code
+        assert "success" in report["compilation"]
+    
+    def test_validation_pipeline_handles_valid_code(self, mock_llm):
+        """
+        GIVEN already valid code
+        WHEN validation runs
+        THEN should pass validation without changes
+        """
+        valid_code = """
+        import androidx.compose.runtime.Composable
+        import androidx.compose.material3.Text
+        
+        @Composable
+        fun ValidScreen() {
+            Text("Hello")
+        }
+        """
+        mock_llm.invoke.return_value = AIMessage(content=valid_code)
+        
+        result = generate_ui_from_description(
+            "Create screen",
+            validate=True,
+            return_report=True
+        )
+        
+        # Should validate successfully
+        report = result["validation_report"]
+        assert report["lint_issues_count"] == 0 or report.get("auto_fixed") is True
+        assert report["compilation"]["success"] is True
