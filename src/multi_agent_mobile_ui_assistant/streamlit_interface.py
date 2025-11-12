@@ -6,11 +6,19 @@ Jetpack Compose UI code with iterative improvements using Streamlit.
 """
 
 import streamlit as st
+import sys
+from pathlib import Path
 from datetime import datetime
-from .ui_generator import generate_ui_from_description
-from .llm_config import get_default_llm
 from langchain_core.messages import SystemMessage, HumanMessage
 import json
+
+# Add src directory to path for imports
+src_path = Path(__file__).parent.parent.parent
+if str(src_path) not in sys.path:
+    sys.path.insert(0, str(src_path))
+
+from src.multi_agent_mobile_ui_assistant.ui_generator import generate_ui_from_description
+from src.multi_agent_mobile_ui_assistant.llm_config import get_default_llm
 
 
 # Page configuration
@@ -247,6 +255,102 @@ def reset_session():
     st.rerun()
 
 
+def generate_preview_html(code: str) -> str:
+    """
+    Generate an HTML preview visualization of the Compose UI structure.
+    This creates a visual representation of the layout hierarchy.
+    """
+    if not code:
+        return "<p>No code to preview</p>"
+    
+    # Parse the code to extract UI structure
+    lines = code.split('\n')
+    preview_html = ['<div style="font-family: system-ui; padding: 20px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 10px;">']
+    preview_html.append('<div style="background: white; padding: 20px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">')
+    
+    indent_level = 0
+    component_colors = {
+        'Column': '#4CAF50',
+        'Row': '#2196F3',
+        'Card': '#FF9800',
+        'Box': '#9C27B0',
+        'Text': '#607D8B',
+        'Button': '#F44336',
+        'Image': '#00BCD4',
+        'TextField': '#FFC107',
+        'LazyColumn': '#8BC34A',
+        'LazyRow': '#3F51B5'
+    }
+    
+    for line in lines:
+        stripped = line.strip()
+        
+        # Detect containers
+        for component in ['Column', 'Row', 'Card', 'Box', 'LazyColumn', 'LazyRow']:
+            if f'{component}(' in stripped:
+                color = component_colors.get(component, '#666')
+                preview_html.append(f'<div style="margin: 8px 0; padding: 12px; border-left: 4px solid {color}; background: #f5f5f5; border-radius: 4px;">')
+                preview_html.append(f'<strong style="color: {color};">📦 {component}</strong>')
+                
+                # Extract modifiers
+                if 'padding' in stripped:
+                    preview_html.append(' <span style="color: #666; font-size: 0.85em;">• padding</span>')
+                if 'fillMaxSize' in stripped or 'fillMaxWidth' in stripped:
+                    preview_html.append(' <span style="color: #666; font-size: 0.85em;">• fill</span>')
+                
+                indent_level += 1
+        
+        # Detect UI components
+        if 'Text(' in stripped:
+            # Extract text content
+            if 'text = "' in stripped:
+                text_content = stripped.split('text = "')[1].split('"')[0]
+                preview_html.append(f'<div style="margin: 8px 0 8px {indent_level * 20}px; padding: 8px; background: #e3f2fd; border-left: 3px solid {component_colors["Text"]}; border-radius: 3px;">')
+                preview_html.append(f'📝 <strong>Text:</strong> "{text_content}"')
+                preview_html.append('</div>')
+        
+        elif 'Button(' in stripped and 'Text(' in code[code.index(stripped):code.index(stripped)+200]:
+            # Try to find button text
+            button_text = "Button"
+            next_lines = '\n'.join(lines[lines.index(line):min(lines.index(line)+5, len(lines))])
+            if 'Text("' in next_lines:
+                try:
+                    button_text = next_lines.split('Text("')[1].split('"')[0]
+                except (IndexError, ValueError):
+                    pass
+            
+            preview_html.append(f'<div style="margin: 8px 0 8px {indent_level * 20}px; padding: 10px 16px; background: {component_colors["Button"]}; color: white; border-radius: 4px; display: inline-block; font-weight: 500;">')
+            preview_html.append(f'🔘 {button_text}')
+            preview_html.append('</div>')
+        
+        elif 'Image(' in stripped or 'Box(' in stripped and 'Image' in code:
+            preview_html.append(f'<div style="margin: 8px 0 8px {indent_level * 20}px; padding: 20px; background: linear-gradient(135deg, #e0e0e0 0%, #bdbdbd 100%); border-radius: 4px; text-align: center; color: #666;">')
+            preview_html.append('🖼️ <strong>Image Placeholder</strong>')
+            preview_html.append('</div>')
+        
+        elif 'TextField(' in stripped:
+            hint = "Enter text"
+            if 'hint = "' in stripped:
+                try:
+                    hint = stripped.split('hint = "')[1].split('"')[0]
+                except (IndexError, ValueError):
+                    pass
+            preview_html.append(f'<div style="margin: 8px 0 8px {indent_level * 20}px; padding: 10px; border: 2px solid {component_colors["TextField"]}; border-radius: 4px; background: white;">')
+            preview_html.append(f'✏️ <span style="color: #999;">{hint}</span>')
+            preview_html.append('</div>')
+        
+        # Close containers
+        if stripped == '}' or stripped == '})':
+            if indent_level > 0:
+                indent_level -= 1
+                preview_html.append('</div>')
+    
+    preview_html.append('</div>')
+    preview_html.append('</div>')
+    
+    return '\n'.join(preview_html)
+
+
 # Main UI Layout
 def main():
     # Header
@@ -347,16 +451,30 @@ def main():
         if st.session_state.current_code:
             st.header("💻 Generated Code")
             
-            # Code display
-            st.code(st.session_state.current_code, language="kotlin", line_numbers=True)
+            # Create tabs for Code and Preview
+            code_tab, preview_tab = st.tabs(["📝 Code", "👁️ Preview"])
             
-            # Download button
-            st.download_button(
-                label="📥 Download Code",
-                data=st.session_state.current_code,
-                file_name="GeneratedUI.kt",
-                mime="text/plain"
-            )
+            with code_tab:
+                # Code display
+                st.code(st.session_state.current_code, language="kotlin", line_numbers=True)
+                
+                # Download button
+                st.download_button(
+                    label="📥 Download Code",
+                    data=st.session_state.current_code,
+                    file_name="GeneratedUI.kt",
+                    mime="text/plain"
+                )
+            
+            with preview_tab:
+                st.markdown("### Visual Structure Preview")
+                st.markdown("*This is a visual representation of your UI layout hierarchy*")
+                
+                # Generate and display preview
+                preview_html = generate_preview_html(st.session_state.current_code)
+                st.markdown(preview_html, unsafe_allow_html=True)
+                
+                st.info("💡 **Tip:** This preview shows the structure and hierarchy of your UI components. For a real preview, copy the code into Android Studio.")
             
             st.divider()
             

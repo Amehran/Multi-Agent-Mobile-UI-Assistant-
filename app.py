@@ -7,10 +7,12 @@ Jetpack Compose UI code.
 
 Usage:
     python app.py
-    # or
-    streamlit run src/multi_agent_mobile_ui_assistant/streamlit_interface.py
+    # or with uv:
+    uv run python app.py
 """
 
+import subprocess
+import sys
 import os
 
 # Get the path to the streamlit interface
@@ -21,5 +23,10 @@ interface_path = os.path.join(
     "streamlit_interface.py"
 )
 
-# Run streamlit
-os.system(f"streamlit run {interface_path}")
+# Check if we're in a uv environment
+if os.path.exists(".venv"):
+    # Use uv run to ensure we're in the virtual environment
+    subprocess.run([sys.executable, "-m", "streamlit", "run", interface_path])
+else:
+    # Fall back to direct streamlit command
+    subprocess.run(["streamlit", "run", interface_path])
