@@ -399,9 +399,15 @@ def generate_preview_html(code: str) -> str:
     }
     
     i = 0
+    in_button = False  # Track if we're inside a Button/OutlinedButton block
+    
     while i < len(lines):
         line = lines[i]
         stripped = line.strip()
+        
+        # Track Button/OutlinedButton blocks to avoid detecting Text inside them separately
+        if ('Button(' in stripped or 'OutlinedButton(' in stripped) and 'IconButton' not in stripped:
+            in_button = True
         
         # Detect containers
         for component in ['Column', 'Row', 'Card', 'Box', 'LazyColumn', 'LazyRow']:
@@ -426,8 +432,28 @@ def generate_preview_html(code: str) -> str:
                     icon_name = stripped.split('Icons.Default.')[1].split(',')[0].split(')')[0].strip()
                 except:
                     pass
+            
+            # Determine icon emoji based on name
+            icon_emoji = "🔵"  # default
+            if 'Account' in icon_name or 'Person' in icon_name or 'User' in icon_name:
+                icon_emoji = "👤"
+            elif 'Google' in icon_name:
+                icon_emoji = "🔴🟡🔵🟢"  # Google colors
+            elif 'Email' in icon_name or 'Mail' in icon_name:
+                icon_emoji = "✉️"
+            elif 'Lock' in icon_name or 'Password' in icon_name:
+                icon_emoji = "🔒"
+            elif 'Visibility' in icon_name:
+                icon_emoji = "👁️"
+            elif 'Search' in icon_name:
+                icon_emoji = "🔍"
+            elif 'Home' in icon_name:
+                icon_emoji = "🏠"
+            elif 'Settings' in icon_name:
+                icon_emoji = "⚙️"
+                
             preview_html.append(f'<div style="margin: 8px 0 8px {indent_level * 20}px; padding: 12px; background: #fff3e0; border-left: 3px solid {component_colors["Icon"]}; border-radius: 3px; text-align: center;">')
-            preview_html.append(f'⭕ <strong>{icon_name}</strong>')
+            preview_html.append(f'{icon_emoji} <strong>{icon_name}</strong>')
             if '.size(' in stripped:
                 try:
                     size = stripped.split('.size(')[1].split(')')[0]
@@ -446,19 +472,54 @@ def generate_preview_html(code: str) -> str:
             except:
                 pass
         
-        # Detect Text
-        elif 'Text(' in stripped and 'text = "' in stripped:
-            try:
-                text_content = stripped.split('text = "')[1].split('"')[0]
+        # Detect Text (handles both single-line and multi-line formats)
+        # Skip if we're inside a Button block (we'll handle button text separately)
+        elif 'Text(' in stripped and not in_button:
+            text_content = None
+            text_style = ""
+            
+            # Try to extract text from current line first
+            if 'text = "' in stripped:
+                try:
+                    text_content = stripped.split('text = "')[1].split('"')[0]
+                except:
+                    pass
+            # Also try Text("...") format (single line)
+            elif 'Text("' in stripped and 'TextField' not in stripped:
+                try:
+                    text_content = stripped.split('Text("')[1].split('"')[0]
+                except:
+                    pass
+            
+            # Look ahead for text property and style if not found yet (for multi-line Text)
+            if not text_content and 'Text(' in stripped:
+                for j in range(i + 1, min(i + 6, len(lines))):
+                    if 'text = "' in lines[j]:
+                        try:
+                            text_content = lines[j].split('text = "')[1].split('"')[0]
+                        except:
+                            pass
+                        break  # Found it, stop looking
+            
+            # Look for style in nearby lines
+            for j in range(i, min(i + 6, len(lines))):
+                if 'headlineLarge' in lines[j]:
+                    text_style = "(headline)"
+                    break
+                elif 'bodySmall' in lines[j]:
+                    text_style = "(small)"
+                    break
+                elif 'bodyMedium' in lines[j]:
+                    text_style = "(body)"
+                    break
+            
+            # Display if we found text content
+            if text_content and 'TextField' not in stripped:
                 preview_html.append(f'<div style="margin: 8px 0 8px {indent_level * 20}px; padding: 8px; background: #e3f2fd; border-left: 3px solid {component_colors["Text"]}; border-radius: 3px;">')
                 preview_html.append(f'📝 <strong>Text:</strong> "{text_content}"')
-                if 'headlineLarge' in stripped:
-                    preview_html.append(' <span style="color: #666; font-size: 0.8em;">(headline)</span>')
-                elif 'bodyMedium' in stripped or 'bodySmall' in stripped:
-                    preview_html.append(' <span style="color: #666; font-size: 0.8em;">(body)</span>')
+                if text_style:
+                    preview_html.append(f' <span style="color: #666; font-size: 0.8em;">{text_style}</span>')
                 preview_html.append('</div>')
-            except:
-                pass
         
         # Detect OutlinedTextField
         elif 'OutlinedTextField(' in stripped:
