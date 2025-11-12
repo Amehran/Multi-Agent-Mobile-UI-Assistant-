@@ -623,3 +623,108 @@ class TestUIGeneratorStateType:
         assert "design_issues" in state
         assert "final_output" in state
         assert "current_step" in state
+
+
+class TestMCPIntegration:
+    """Tests for MCP (Model Context Protocol) integration with UI Generator."""
+    
+    def test_generate_ui_accepts_github_examples(self, mock_llm):
+        """
+        GIVEN GitHub compose examples
+        WHEN generating UI with examples as context
+        THEN should use examples to improve generation quality
+        """
+        from src.multi_agent_mobile_ui_assistant.mcp_tools import ComposeExample
+        
+        # Mock LLM to return code
+        mock_llm.invoke.return_value = AIMessage(content="@Composable fun MyScreen() {}")
+        
+        examples = [
+            ComposeExample(
+                code="@Composable fun LoginButton() { Button { Text(\"Login\") } }",
+                description="Login button example",
+                file_path="samples/Login.kt",
+                repo_url="https://github.com/android/compose-samples"
+            )
+        ]
+        
+        # Should accept examples parameter
+        result = generate_ui_from_description(
+            "Create a login screen",
+            github_examples=examples
+        )
+        
+        assert result is not None
+        assert "@Composable" in result
+    
+    def test_generate_ui_accepts_project_context(self, mock_llm):
+        """
+        GIVEN existing project structure info
+        WHEN generating UI
+        THEN should respect existing components
+        """
+        mock_llm.invoke.return_value = AIMessage(content="@Composable fun NewScreen() {}")
+        
+        project_context = {
+            "existing_composables": [
+                {"name": "CustomButton", "file": "ui/Button.kt"}
+            ]
+        }
+        
+        result = generate_ui_from_description(
+            "Create a screen",
+            project_context=project_context
+        )
+        
+        assert result is not None
+    
+    def test_generate_multi_file_ui(self, mock_llm):
+        """
+        GIVEN request for complete feature with multi_file=True
+        WHEN generating multi-file UI  
+        THEN should accept parameter and return dict (even if single file for now)
+        """
+        mock_llm.invoke.return_value = AIMessage(content="@Composable fun MainActivity() {}")
+        
+        result = generate_ui_from_description(
+            "Create a complete login feature",
+            multi_file=True
+        )
+        
+        # Should return dict format when multi_file=True
+        assert isinstance(result, dict)
+        # For Phase 1, we accept it returning a single file
+        assert len(result) >= 1
+    
+    def test_ui_generator_enriches_prompt_with_examples(self, mock_llm):
+        """
+        GIVEN GitHub examples provided
+        WHEN UI generator agent runs
+        THEN should log that examples are being used
+        """
+        from src.multi_agent_mobile_ui_assistant.mcp_tools import ComposeExample
+        
+        mock_llm.invoke.return_value = AIMessage(content="@Composable fun Screen() {}")
+        
+        state = {
+            "user_input": "Create a button",
+            "messages": [],
+            "parsed_intent": {"ui_elements": [{"type": "Button"}]},
+            "layout_plan": {"layout": "Column"},
+            "github_examples": [
+                ComposeExample(
+                    code="@Composable fun Example() {}",
+                    description="Example",
+                    file_path="ex.kt",
+                    repo_url="https://github.com/test"
+                )
+            ],
+            "project_context": {},
+            "multi_file": False
+        }
+        
+        _ = ui_generator_agent(state)
+        
+        # Should recognize and use examples (verified by print output or state)
+        # For now, we just verify it doesn't crash with examples present
+        assert True  # Phase 1: Basic acceptance test

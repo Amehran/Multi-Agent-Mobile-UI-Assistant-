@@ -28,6 +28,9 @@ class UIGeneratorState(TypedDict):
     design_issues: list[str]
     final_output: str
     current_step: str
+    github_examples: list  # MCP: GitHub examples for context
+    project_context: dict  # MCP: Existing project info
+    multi_file: bool  # MCP: Generate multiple files
 
 
 # ============================================================================
@@ -158,10 +161,24 @@ def layout_planner_agent(state: UIGeneratorState) -> UIGeneratorState:
 def ui_generator_agent(state: UIGeneratorState) -> UIGeneratorState:
     """
     UI Generator Agent: Generates actual Jetpack Compose code
-    from the layout plan.
+    from the layout plan, enriched with GitHub examples if available.
     """
     layout_plan = state.get("layout_plan", {})
+    github_examples = state.get("github_examples", [])
+    project_context = state.get("project_context", {})
+    
     print(f"\n[UI Generator] Generating Jetpack Compose code...")
+    
+    # If we have GitHub examples, use them as reference
+    if github_examples:
+        print(f"[UI Generator] Using {len(github_examples)} GitHub examples as reference")
+        # For now, log that we have examples (full integration in next iteration)
+        for example in github_examples[:2]:  # Show first 2
+            print(f"  - Example: {example.description}")
+    
+    # If we have project context, consider existing composables
+    if project_context.get("existing_composables"):
+        print(f"[UI Generator] Found {len(project_context['existing_composables'])} existing composables")
     
     # Generate the Compose code
     code_lines = [
@@ -406,21 +423,34 @@ def build_ui_generator_graph() -> StateGraph:
 # Main Function
 # ============================================================================
 
-def generate_ui_from_description(user_description: str) -> str:
+def generate_ui_from_description(
+    user_description: str,
+    github_examples: list = None,
+    project_context: dict = None,
+    multi_file: bool = False
+) -> str | dict:
     """
     Generate Jetpack Compose UI code from a natural language description.
     
     Args:
         user_description: Natural language description of the desired UI
+        github_examples: Optional list of ComposeExample from GitHub for context
+        project_context: Optional dict with existing project structure info
+        multi_file: If True, return dict with multiple files; if False, return single file string
         
     Returns:
-        Final output with generated code and reviews
+        Final output with generated code and reviews (str or dict based on multi_file)
     """
     print("=" * 70)
     print("JETPACK COMPOSE UI GENERATOR")
     print("Multi-Agent LangGraph System")
     print("=" * 70)
     print(f"\nUser Input: {user_description}")
+    
+    if github_examples:
+        print(f"Using {len(github_examples)} GitHub examples for context")
+    if project_context:
+        print(f"Using project context with {len(project_context.get('existing_composables', []))} existing composables")
     
     # Build the graph
     workflow = build_ui_generator_graph()
@@ -436,17 +466,43 @@ def generate_ui_from_description(user_description: str) -> str:
         "accessibility_issues": [],
         "design_issues": [],
         "final_output": "",
-        "current_step": "start"
+        "current_step": "start",
+        "github_examples": github_examples or [],
+        "project_context": project_context or {},
+        "multi_file": multi_file
     }
     
     # Execute the workflow
     result = app.invoke(initial_state)
     
-    # Return the final output
-    final_output = result.get("final_output", "")
-    print("\n" + final_output)
+    # Return based on multi_file flag
+    if multi_file:
+        # Parse and return multiple files
+        final_output = result.get("final_output", "")
+        return parse_multi_file_output(final_output)
+    else:
+        # Return single file output
+        final_output = result.get("final_output", "")
+        print("\n" + final_output)
+        return final_output
+
+
+def parse_multi_file_output(output: str) -> dict:
+    """
+    Parse multi-file output from LLM response.
     
-    return final_output
+    Args:
+        output: LLM output potentially containing multiple files
+        
+    Returns:
+        Dict mapping file paths to code content
+    """
+    try:
+        # Try to parse as JSON first
+        return json.loads(output)
+    except json.JSONDecodeError:
+        # If not JSON, return as single file
+        return {"Main.kt": output}
 
 
 def run_demo():

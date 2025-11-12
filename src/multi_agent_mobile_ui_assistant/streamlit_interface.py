@@ -18,7 +18,7 @@ if str(src_path) not in sys.path:
     sys.path.insert(0, str(src_path))
 
 from src.multi_agent_mobile_ui_assistant.ui_generator import generate_ui_from_description
-from src.multi_agent_mobile_ui_assistant.llm_config import get_default_llm
+from src.multi_agent_mobile_ui_assistant.llm_config import create_llm
 
 
 # Page configuration
@@ -71,6 +71,18 @@ if 'current_design' not in st.session_state:
     st.session_state.current_design = ""
 if 'iteration_count' not in st.session_state:
     st.session_state.iteration_count = 0
+if 'llm_provider' not in st.session_state:
+    st.session_state.llm_provider = "ollama"
+if 'llm_model' not in st.session_state:
+    st.session_state.llm_model = "llama3.2"
+
+
+def get_llm_for_session():
+    """Get LLM instance based on session state settings."""
+    provider = st.session_state.llm_provider
+    model = st.session_state.llm_model
+    
+    return create_llm(provider=provider, model=model)
 
 
 def extract_code_from_output(output: str) -> str:
@@ -161,7 +173,7 @@ def refine_ui(feedback: str):
     
     with st.spinner("✨ Refining UI based on your feedback..."):
         try:
-            llm = get_default_llm()
+            llm = get_llm_for_session()
             
             # Create refinement prompt
             system_prompt = """You are a Jetpack Compose UI expert. You refine generated UI code based on user feedback.
@@ -403,6 +415,43 @@ def main():
     
     # Sidebar
     with st.sidebar:
+        # LLM Provider Selection
+        st.header("🤖 LLM Settings")
+        
+        provider_option = st.selectbox(
+            "LLM Provider",
+            options=["ollama", "openai"],
+            index=0 if st.session_state.llm_provider == "ollama" else 1,
+            help="Choose between local Ollama or OpenAI API",
+            key="llm_provider_select"
+        )
+        
+        # Update session state if changed
+        if provider_option != st.session_state.llm_provider:
+            st.session_state.llm_provider = provider_option
+            # Update default model based on provider
+            if provider_option == "ollama":
+                st.session_state.llm_model = "llama3.2"
+            else:
+                st.session_state.llm_model = "gpt-4o-mini"
+        
+        # Model selection
+        model_name = st.text_input(
+            "Model Name",
+            value=st.session_state.llm_model,
+            help="For Ollama: llama3.2, codellama, etc.\nFor OpenAI: gpt-4o-mini, gpt-4, gpt-3.5-turbo, etc.",
+            key="llm_model_input"
+        )
+        
+        # Update session state if changed
+        if model_name != st.session_state.llm_model:
+            st.session_state.llm_model = model_name
+        
+        # Show current configuration
+        st.info(f"✓ Using **{st.session_state.llm_provider}** with model **{st.session_state.llm_model}**")
+        
+        st.divider()
+        
         st.header("📋 How It Works")
         st.markdown("""
         1. **Describe** your UI in plain English
