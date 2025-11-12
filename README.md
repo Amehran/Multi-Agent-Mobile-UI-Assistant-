@@ -107,7 +107,34 @@ OPENAI_API_KEY=your-api-key-here
 
 ## Usage
 
-### Interactive Mode
+### 🌐 Web Interface (Recommended)
+
+Launch the interactive Streamlit web UI for the best experience:
+
+```bash
+python app.py
+# or directly:
+streamlit run src/multi_agent_mobile_ui_assistant/streamlit_interface.py
+```
+
+Then open your browser to the URL shown in the terminal (typically `http://localhost:8501`)
+
+**Features:**
+- 🎨 Generate UI from natural language
+- ✨ Iteratively refine generated code with feedback
+- 📜 Track complete iteration history
+- 👀 Live preview of code and reviews
+- 💡 Example prompts to get started
+- 📥 Download generated code
+- 🎯 Beautiful, responsive interface
+
+**Tips:**
+- Use the sidebar for example prompts
+- View history in a separate tab
+- Download code with one click
+- Session state persists during your session
+
+### 💻 Command Line Interface
 
 ```bash
 uv run main.py
