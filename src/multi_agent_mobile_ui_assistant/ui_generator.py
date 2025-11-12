@@ -4,9 +4,14 @@ Multi-Agent Jetpack Compose UI Generator
 This module implements a LangGraph-based multi-agent system that generates
 functional, high-quality Jetpack Compose UI code from natural language descriptions.
 
-Agent Flow:
-User Input → Intent Parser → Layout Planner → UI Generator → 
-Accessibility Reviewer → UI Reviewer → Output
+Simplified Agent Flow (leveraging LLM capabilities):
+User Input → UI Generator → Accessibility Reviewer → UI Reviewer → Output
+
+MCP Tools enhance each stage:
+- GitHub MCP: Provides real-world Compose examples for context
+- FileSystem MCP: Accesses existing project structure
+- Android Tools MCP: Validates and auto-fixes generated code
+- Figma MCP: Extracts design specifications
 """
 
 from typing import TypedDict, Annotated, Literal
@@ -21,8 +26,6 @@ class UIGeneratorState(TypedDict):
     """State for the UI generator workflow."""
     messages: Annotated[list, add_messages]
     user_input: str
-    parsed_intent: dict
-    layout_plan: dict
     generated_code: str
     accessibility_issues: list[str]
     design_issues: list[str]
@@ -35,147 +38,34 @@ class UIGeneratorState(TypedDict):
 
 
 # ============================================================================
-# Agent: Intent Parser
-# ============================================================================
-
-def intent_parser_agent(state: UIGeneratorState) -> UIGeneratorState:
-    """
-    Intent Parser Agent: Extracts UI elements, layout hierarchy, 
-    styles, and actions from natural language using LLM.
-    """
-    user_input = state.get("user_input", "")
-    print(f"\n[Intent Parser] Analyzing: '{user_input}'")
-    
-    # Get LLM instance
-    llm = get_default_llm()
-    
-    # Create prompt for intent parsing
-    system_prompt = """You are a UI intent parser. Extract UI components and layout information from user descriptions.
-
-Respond with a JSON object containing:
-- ui_elements: array of UI components (type, text/content, style, action)
-- layout_type: main container type (Column, Row, Card, Box, etc.)
-- styles: any specific styling requirements
-- actions: any user interactions mentioned
-
-Component types: Text, Button, Image, TextField, Icon, Divider, Spacer
-Layout types: Column, Row, Card, Box, LazyColumn, LazyRow
-
-Example input: "Create a login screen with a title, email field, password field, and login button"
-Example output:
-{
-    "ui_elements": [
-        {"type": "Text", "content": "Login", "style": "headlineLarge"},
-        {"type": "TextField", "content": "Email", "hint": "Enter your email"},
-        {"type": "TextField", "content": "Password", "hint": "Enter your password", "secure": true},
-        {"type": "Button", "text": "Login", "action": "onLogin"}
-    ],
-    "layout_type": "Column",
-    "styles": {"spacing": "medium", "alignment": "center"},
-    "actions": ["onLogin"]
-}
-
-Only return valid JSON, no additional text."""
-
-    # Call LLM
-    messages = [
-        SystemMessage(content=system_prompt),
-        HumanMessage(content=user_input)
-    ]
-    
-    response = llm.invoke(messages)
-    
-    # Parse LLM response
-    try:
-        # Extract JSON from response
-        response_text = response.content
-        # Handle potential markdown code blocks
-        if "```json" in response_text:
-            response_text = response_text.split("```json")[1].split("```")[0].strip()
-        elif "```" in response_text:
-            response_text = response_text.split("```")[1].split("```")[0].strip()
-        
-        parsed_intent = json.loads(response_text)
-        print(f"[Intent Parser] Extracted {len(parsed_intent.get('ui_elements', []))} UI elements")
-        print(f"[Intent Parser] Layout type: {parsed_intent.get('layout_type', 'Column')}")
-    except (json.JSONDecodeError, IndexError, AttributeError) as e:
-        print(f"[Intent Parser] Warning: Failed to parse LLM response: {e}")
-        print(f"[Intent Parser] Response: {response.content}")
-        # Fallback to default structure
-        parsed_intent = {
-            "ui_elements": [
-                {"type": "Text", "content": "Error parsing intent", "style": "bodyLarge"}
-            ],
-            "layout_type": "Column",
-            "styles": {},
-            "actions": []
-        }
-    
-    return {
-        "messages": [{"role": "assistant", "content": "Intent parsing complete"}],
-        "parsed_intent": parsed_intent,
-        "current_step": "intent_parsed"
-    }
-
-
-# ============================================================================
-# Agent: Layout Planner
-# ============================================================================
-
-def layout_planner_agent(state: UIGeneratorState) -> UIGeneratorState:
-    """
-    Layout Planner Agent: Translates parsed intent into structured layout
-    (Column, Row, Box, etc.) following Compose best practices.
-    """
-    parsed_intent = state.get("parsed_intent", {})
-    print(f"\n[Layout Planner] Creating layout plan...")
-    
-    layout_plan = {
-        "root_container": parsed_intent.get("layout_type", "Column"),
-        "children": [],
-        "modifiers": ["fillMaxSize", "padding(16.dp)"],
-        "arrangement": "Center" if parsed_intent.get("layout_type") == "Column" else "Start"
-    }
-    
-    # Plan the layout structure
-    for element in parsed_intent.get("ui_elements", []):
-        layout_plan["children"].append({
-            "component": element["type"],
-            "properties": element,
-            "modifiers": []
-        })
-    
-    print(f"[Layout Planner] Planned {len(layout_plan['children'])} components")
-    print(f"[Layout Planner] Root container: {layout_plan['root_container']}")
-    
-    return {
-        "messages": [{"role": "assistant", "content": "Layout planning complete"}],
-        "layout_plan": layout_plan,
-        "current_step": "layout_planned"
-    }
-
-
-# ============================================================================
-# Agent: UI Generator
+# Agent: UI Generator (Direct LLM-Based Generation)
 # ============================================================================
 
 def ui_generator_agent(state: UIGeneratorState) -> UIGeneratorState:
     """
-    UI Generator Agent: Generates actual Jetpack Compose code
-    from the layout plan using LLM, enriched with GitHub examples if available.
+    UI Generator Agent: Generates actual Jetpack Compose code directly from user input
+    using LLM, enriched with MCP tools (GitHub examples, project context, Figma designs).
+    
+    This agent uses the raw user prompt directly - the LLM handles intent parsing and 
+    layout planning internally, which produces better results than preprocessing steps.
     """
-    layout_plan = state.get("layout_plan", {})
-    parsed_intent = state.get("parsed_intent", {})
     user_input = state.get("user_input", "")
     github_examples = state.get("github_examples", [])
     project_context = state.get("project_context", {})
     use_llm = state.get("use_llm_generation", True)  # Default to True for production
     
-    print("\n[UI Generator] Generating Jetpack Compose code...")
+    print("\n[UI Generator] Generating Jetpack Compose code directly from user prompt...")
     
     # If LLM is disabled (for testing), use fallback
     if not use_llm:
         print("[UI Generator] Using fallback template generation (testing mode)")
+        # Create minimal layout plan for template
+        layout_plan = {
+            "root_container": "Column",
+            "children": [{"component": "Text", "properties": {"content": user_input}}],
+            "modifiers": ["fillMaxSize", "padding(16.dp)"],
+            "arrangement": "Center"
+        }
         generated_code = _generate_template_code(layout_plan)
     else:
         # Build context for LLM
@@ -192,7 +82,14 @@ def ui_generator_agent(state: UIGeneratorState) -> UIGeneratorState:
         # Add project context if available
         if project_context.get("existing_composables"):
             print(f"[UI Generator] Found {len(project_context['existing_composables'])} existing composables")
-            context_parts.append(f"\nExisting composables in project: {', '.join(project_context['existing_composables'][:5])}")
+            # Extract names from composables (handle both dict and string formats)
+            composable_names = []
+            for comp in project_context['existing_composables'][:5]:
+                if isinstance(comp, dict):
+                    composable_names.append(comp.get('name', str(comp)))
+                else:
+                    composable_names.append(str(comp))
+            context_parts.append(f"\nExisting composables in project: {', '.join(composable_names)}")
         
         # Create detailed prompt for LLM
         system_prompt = """You are an expert Jetpack Compose developer. Generate complete, production-ready Compose code.
@@ -270,10 +167,9 @@ Generate code that EXACTLY matches the user's specifications."""
         user_message_parts = [
             "=== USER'S EXACT REQUIREMENTS ===",
             f"{user_input}",
-            f"\n=== YOUR TASK ===",
-            f"Generate Jetpack Compose code that implements EVERY SINGLE ITEM listed above.",
-            f"You MUST include ALL {len(parsed_intent.get('ui_elements', []))} components mentioned.",
-            f"\n=== MANDATORY CODE STRUCTURE ===",
+            "\n=== YOUR TASK ===",
+            "Generate Jetpack Compose code that implements EVERY SINGLE ITEM listed above.",
+            "\n=== MANDATORY CODE STRUCTURE ===",
         ]
         
         # Add step-by-step component generation instructions
@@ -306,7 +202,7 @@ import androidx.compose.ui.unit.dp
         user_message_parts.append("Example: var password by remember { mutableStateOf(\"\") }")
         user_message_parts.append("Example: var passwordVisible by remember { mutableStateOf(false) }")
         
-        user_message_parts.append(f"\n4. MAIN CONTAINER - {layout_plan.get('root_container', 'Column')}:")
+        user_message_parts.append(f"\n4. MAIN CONTAINER - Column:")
         user_message_parts.append("""    Column(
         modifier = Modifier
             .fillMaxSize()
@@ -381,7 +277,7 @@ import androidx.compose.ui.unit.dp
         user_message_parts.append("    }\n}")
         
         user_message_parts.append(f"\n\n=== CRITICAL CHECKLIST ===")
-        user_message_parts.append(f"☐ Did you include ALL {len(parsed_intent.get('ui_elements', []))} components?")
+        user_message_parts.append("☐ Did you include ALL components from the requirements?")
         user_message_parts.append("☐ Did you use the EXACT spacing values (24dp, 32dp, 16dp, 8dp)?")
         user_message_parts.append("☐ Did you use OutlinedTextField (not Text) for input fields?")
         user_message_parts.append("☐ Did you add password visibility toggle?")
@@ -413,6 +309,7 @@ import androidx.compose.ui.unit.dp
             generated_code = response.content.strip()
             
             print(f"[UI Generator] Raw LLM response length: {len(generated_code)} chars")
+            print(f"[UI Generator] First 500 chars: {generated_code[:500]}")
             
             # Clean up the response - extract code if wrapped in markdown
             if "```kotlin" in generated_code:
@@ -468,8 +365,14 @@ import androidx.compose.ui.unit.dp
             print(f"[UI Generator] Generated {len(generated_code.split(chr(10)))} lines of code using LLM")
             
         except Exception as e:
-            print(f"[UI Generator] LLM generation failed: {e}, falling back to template")
+            print(f"[UI Generator] LLM generation failed: {e}, falling back to minimal template")
             # Fallback to basic template if LLM fails
+            layout_plan = {
+                "root_container": "Column",
+                "children": [{"component": "Text", "properties": {"content": "Error generating UI", "style": "bodyLarge"}}],
+                "modifiers": ["fillMaxSize", "padding(16.dp)"],
+                "arrangement": "Center"
+            }
             generated_code = _generate_template_code(layout_plan)
     
     # Apply validation if requested
@@ -713,23 +616,27 @@ def output_node(state: UIGeneratorState) -> UIGeneratorState:
 # ============================================================================
 
 def build_ui_generator_graph() -> StateGraph:
-    """Build and return the UI generator graph."""
+    """
+    Build and return the simplified UI generator graph.
+    
+    Flow: User Input → UI Generator → Accessibility Reviewer → UI Reviewer → Output
+    
+    This simplified architecture removes redundant preprocessing (Intent Parser, Layout Planner)
+    and lets the LLM handle intent understanding and layout planning directly, which produces
+    better results. MCP tools still enhance each stage with real-world examples and validation.
+    """
     workflow = StateGraph(UIGeneratorState)
     
-    # Add all agent nodes
-    workflow.add_node("intent_parser", intent_parser_agent)
-    workflow.add_node("layout_planner", layout_planner_agent)
+    # Add agent nodes (simplified pipeline)
     workflow.add_node("ui_generator", ui_generator_agent)
     workflow.add_node("accessibility_reviewer", accessibility_reviewer_agent)
     workflow.add_node("ui_reviewer", ui_reviewer_agent)
     workflow.add_node("output", output_node)
     
-    # Set entry point
-    workflow.set_entry_point("intent_parser")
+    # Set entry point - go directly to UI Generator
+    workflow.set_entry_point("ui_generator")
     
-    # Define the linear flow
-    workflow.add_edge("intent_parser", "layout_planner")
-    workflow.add_edge("layout_planner", "ui_generator")
+    # Define the simplified linear flow
     workflow.add_edge("ui_generator", "accessibility_reviewer")
     workflow.add_edge("accessibility_reviewer", "ui_reviewer")
     workflow.add_edge("ui_reviewer", "output")
@@ -785,8 +692,6 @@ def generate_ui_from_description(
     initial_state = {
         "messages": [],
         "user_input": user_description,
-        "parsed_intent": {},
-        "layout_plan": {},
         "generated_code": "",
         "accessibility_issues": [],
         "design_issues": [],
