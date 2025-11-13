@@ -858,13 +858,17 @@ def main():
                 # Code display
                 st.code(st.session_state.current_code, language="kotlin", line_numbers=True)
                 
-                # Download button
-                st.download_button(
-                    label="📥 Download Code",
-                    data=st.session_state.current_code,
-                    file_name="GeneratedUI.kt",
-                    mime="text/plain"
-                )
+                # Download button - only show if code exists
+                if st.session_state.current_code and len(st.session_state.current_code.strip()) > 0:
+                    st.download_button(
+                        label="📥 Download Code",
+                        data=st.session_state.current_code,
+                        file_name="GeneratedUI.kt",
+                        mime="text/x-kotlin",
+                        key=f"download_code_{st.session_state.iteration_count}"
+                    )
+                else:
+                    st.info("No code to download yet. Generate UI first.")
             
             # Preview tab
             with tab_objects[1]:
