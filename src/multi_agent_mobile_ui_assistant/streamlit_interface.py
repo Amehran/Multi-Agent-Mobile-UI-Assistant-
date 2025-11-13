@@ -371,47 +371,34 @@ def reset_session():
 def generate_preview_html(code: str) -> str:
     """
     Generate an HTML preview visualization of the Compose UI structure.
-    This creates a visual representation of the layout hierarchy.
+    Simple parser that shows components in order.
     """
     if not code:
         return "<p>No code to preview</p>"
     
-    # Parse the code to extract UI structure
     lines = code.split('\n')
     preview_html = ['<div style="font-family: system-ui; padding: 20px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 10px;">']
     preview_html.append('<div style="background: white; padding: 20px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">')
     
-    indent_level = 0
-    component_colors = {
-        'Column': '#4CAF50',
-        'Row': '#2196F3',
-        'Card': '#FF9800',
-        'Box': '#9C27B0',
-        'Text': '#607D8B',
-        'Button': '#F44336',
-        'Image': '#00BCD4',
-        'TextField': '#FFC107',
-        'LazyColumn': '#8BC34A',
-        'LazyRow': '#3F51B5',
-        'Icon': '#FF5722',
-        'Spacer': '#9E9E9E',
-        'Divider': '#795548'
-    }
+    # Track nesting
+    indent = 0
     
     i = 0
-    in_button = False  # Track if we're inside a Button/OutlinedButton block
-    
     while i < len(lines):
+        if i < skip_until:
+            i += 1
+            continue
+            
         line = lines[i]
         stripped = line.strip()
-        
-        # Track Button/OutlinedButton blocks to avoid detecting Text inside them separately
-        if ('Button(' in stripped or 'OutlinedButton(' in stripped) and 'IconButton' not in stripped:
-            in_button = True
         
         # Detect containers
         for component in ['Column', 'Row', 'Card', 'Box', 'LazyColumn', 'LazyRow']:
             if f'{component}(' in stripped:
+                # Skip Row if it contains HorizontalDivider (it's the OR divider row)
+                if component == 'Row' and 'HorizontalDivider' in ' '.join(lines[i:min(i+5, len(lines))]):
+                    continue
+                    
                 color = component_colors.get(component, '#666')
                 preview_html.append(f'<div style="margin: 8px 0; padding: 12px; border-left: 4px solid {color}; background: #f5f5f5; border-radius: 4px;">')
                 preview_html.append(f'<strong style="color: {color};">📦 {component}</strong>')
@@ -424,8 +411,9 @@ def generate_preview_html(code: str) -> str:
                 
                 indent_level += 1
         
+        
         # Detect Icon
-        if 'Icon(' in stripped:
+        if 'Icon(' in stripped and 'IconButton' not in stripped:
             icon_name = "Icon"
             if 'Icons.Default.' in stripped:
                 try:
@@ -445,12 +433,6 @@ def generate_preview_html(code: str) -> str:
                 icon_emoji = "🔒"
             elif 'Visibility' in icon_name:
                 icon_emoji = "👁️"
-            elif 'Search' in icon_name:
-                icon_emoji = "🔍"
-            elif 'Home' in icon_name:
-                icon_emoji = "🏠"
-            elif 'Settings' in icon_name:
-                icon_emoji = "⚙️"
                 
             preview_html.append(f'<div style="margin: 8px 0 8px {indent_level * 20}px; padding: 12px; background: #fff3e0; border-left: 3px solid {component_colors["Icon"]}; border-radius: 3px; text-align: center;">')
             preview_html.append(f'{icon_emoji} <strong>{icon_name}</strong>')
@@ -463,70 +445,67 @@ def generate_preview_html(code: str) -> str:
             preview_html.append('</div>')
         
         # Detect Spacer
-        elif 'Spacer(' in stripped and 'height' in stripped:
-            try:
-                height = stripped.split('.height(')[1].split(')')[0]
-                preview_html.append(f'<div style="margin: 8px 0 8px {indent_level * 20}px; height: 4px; background: repeating-linear-gradient(90deg, #ddd 0px, #ddd 5px, transparent 5px, transparent 10px); border-radius: 2px;">')
-                preview_html.append(f'<span style="font-size: 0.7em; color: #999;">↕️ {height}</span>')
-                preview_html.append('</div>')
-            except:
-                pass
+        elif 'Spacer(' in stripped:
+            height = "16.dp"
+            if '.height(' in stripped:
+                try:
+                    height = stripped.split('.height(')[1].split(')')[0]
+                except:
+                    pass
+            elif '.width(' in stripped:
+                try:
+                    height = stripped.split('.width(')[1].split(')')[0]
+                except:
+                    pass
+            preview_html.append(f'<div style="margin: 8px 0 8px {indent_level * 20}px; height: 4px; background: repeating-linear-gradient(90deg, #ddd 0px, #ddd 5px, transparent 5px, transparent 10px); border-radius: 2px;">')
+            preview_html.append(f'<span style="font-size: 0.7em; color: #999;">↕️ {height}</span>')
+            preview_html.append('</div>')
         
-        # Detect Text (handles both single-line and multi-line formats)
-        # Skip if we're inside a Button block (we'll handle button text separately)
-        elif 'Text(' in stripped and not in_button:
-            text_content = None
-            text_style = ""
+        # Detect standalone Text (NOT inside TextField, Button, etc.)
+        elif 'Text(' in stripped and 'TextField' not in stripped and 'Button' not in line:
+            # Check if this is inside a Row with HorizontalDivider (OR text) - skip it
+            is_or_text = False
+            for j in range(max(0, i-2), min(i+2, len(lines))):
+                if 'HorizontalDivider' in lines[j] and ('OR' in stripped or 'or' in stripped.lower()):
+                    is_or_text = True
+                    break
             
-            # Try to extract text from current line first
-            if 'text = "' in stripped:
-                try:
-                    text_content = stripped.split('text = "')[1].split('"')[0]
-                except:
-                    pass
-            # Also try Text("...") format (single line)
-            elif 'Text("' in stripped and 'TextField' not in stripped:
-                try:
-                    text_content = stripped.split('Text("')[1].split('"')[0]
-                except:
-                    pass
-            
-            # Look ahead for text property and style if not found yet (for multi-line Text)
-            if not text_content and 'Text(' in stripped:
-                for j in range(i + 1, min(i + 6, len(lines))):
-                    if 'text = "' in lines[j]:
-                        try:
-                            text_content = lines[j].split('text = "')[1].split('"')[0]
-                        except:
-                            pass
-                        break  # Found it, stop looking
-            
-            # Look for style in nearby lines
-            for j in range(i, min(i + 6, len(lines))):
-                if 'headlineLarge' in lines[j]:
+            if not is_or_text:
+                text_content = None
+                text_style = ""
+                
+                # Extract text - handle Text("...") format on same line
+                if 'Text("' in stripped:
+                    try:
+                        # Get everything after Text(" until the closing "
+                        after_text = stripped.split('Text("')[1]
+                        text_content = after_text.split('"')[0]
+                    except:
+                        pass
+                
+                # Look for style indicators
+                if 'headlineLarge' in stripped or any('headlineLarge' in lines[j] for j in range(i, min(i+3, len(lines)))):
                     text_style = "(headline)"
-                    break
-                elif 'bodySmall' in lines[j]:
+                elif 'bodySmall' in stripped or any('bodySmall' in lines[j] for j in range(i, min(i+3, len(lines)))):
                     text_style = "(small)"
-                    break
-                elif 'bodyMedium' in lines[j]:
+                elif 'bodyMedium' in stripped or any('bodyMedium' in lines[j] for j in range(i, min(i+3, len(lines)))):
                     text_style = "(body)"
-                    break
-            
-            # Display if we found text content
-            if text_content and 'TextField' not in stripped:
-                preview_html.append(f'<div style="margin: 8px 0 8px {indent_level * 20}px; padding: 8px; background: #e3f2fd; border-left: 3px solid {component_colors["Text"]}; border-radius: 3px;">')
-                preview_html.append(f'📝 <strong>Text:</strong> "{text_content}"')
-                if text_style:
-                    preview_html.append(f' <span style="color: #666; font-size: 0.8em;">{text_style}</span>')
-                preview_html.append('</div>')
+                
+                # Display if we found text content
+                if text_content:
+                    preview_html.append(f'<div style="margin: 8px 0 8px {indent_level * 20}px; padding: 8px; background: #e3f2fd; border-left: 3px solid {component_colors["Text"]}; border-radius: 3px;">')
+                    preview_html.append(f'📝 <strong>Text:</strong> "{text_content}"')
+                    if text_style:
+                        preview_html.append(f' <span style="color: #666; font-size: 0.8em;">{text_style}</span>')
+                    preview_html.append('</div>')
         
+                
         # Detect OutlinedTextField
         elif 'OutlinedTextField(' in stripped:
             label = "TextField"
             placeholder = "Enter text"
             # Look ahead for label and placeholder
-            for j in range(i, min(i + 6, len(lines))):
+            for j in range(i, min(i + 8, len(lines))):
                 if 'label = { Text("' in lines[j]:
                     try:
                         label = lines[j].split('label = { Text("')[1].split('"')[0]
@@ -542,6 +521,52 @@ def generate_preview_html(code: str) -> str:
             preview_html.append(f'<div style="font-size: 0.75em; color: #666; margin-bottom: 4px;">{label}</div>')
             preview_html.append(f'✏️ <span style="color: #999;">{placeholder}</span>')
             preview_html.append('</div>')
+        
+        # Detect Button or OutlinedButton
+        elif ('Button(' in stripped or 'OutlinedButton(' in stripped) and 'IconButton' not in stripped:
+            button_text = "Button"
+            button_type = "filled" if 'Button(' in stripped and 'OutlinedButton' not in stripped else "outlined"
+            # Look ahead for Text inside button
+            for j in range(i, min(i + 8, len(lines))):
+                if 'Text("' in lines[j] and 'TextField' not in lines[j]:
+                    try:
+                        button_text = lines[j].split('Text("')[1].split('"')[0]
+                    except:
+                        pass
+                    break
+                # Stop if we hit closing brace
+                if '}' in lines[j] and j > i:
+                    break
+            
+            if button_type == "filled":
+                preview_html.append(f'<div style="margin: 8px 0 8px {indent_level * 20}px; padding: 12px 24px; background: {component_colors["Button"]}; color: white; border-radius: 8px; display: inline-block; font-weight: 500; text-align: center;">')
+            else:
+                preview_html.append(f'<div style="margin: 8px 0 8px {indent_level * 20}px; padding: 12px 24px; background: white; border: 2px solid {component_colors["Button"]}; color: {component_colors["Button"]}; border-radius: 8px; display: inline-block; font-weight: 500; text-align: center;">')
+            preview_html.append(f'◆ {button_text}')
+            preview_html.append('</div>')
+            skip_until = i + 8  # Skip the button's content lines
+        
+        # Detect HorizontalDivider (handle OR divider pattern)
+        elif 'HorizontalDivider(' in stripped:
+            # Check if this is part of a Row with OR text
+            is_or_divider = False
+            for j in range(max(0, i-3), min(i+4, len(lines))):
+                if ('Text("OR"' in lines[j] or "Text('OR'" in lines[j] or 
+                    'Text("or"' in lines[j] or "Text('or'" in lines[j]):
+                    is_or_divider = True
+                    break
+            
+            # Only render once for OR pattern (first HorizontalDivider in sequence)
+            if is_or_divider:
+                if i == 0 or 'HorizontalDivider' not in lines[i-1]:
+                    preview_html.append(f'<div style="margin: 16px 0 8px {indent_level * 20}px; display: flex; align-items: center; gap: 12px;">')
+                    preview_html.append(f'<div style="flex: 1; height: 1px; background: #ddd;"></div>')
+                    preview_html.append(f'<span style="color: #666; font-weight: 500;">OR</span>')
+                    preview_html.append(f'<div style="flex: 1; height: 1px; background: #ddd;"></div>')
+                    preview_html.append('</div>')
+            else:
+                # Regular divider
+                preview_html.append(f'<div style="margin: 8px 0 8px {indent_level * 20}px; height: 1px; background: #ddd;"></div>')
         
         # Detect Button or OutlinedButton
         elif ('Button(' in stripped or 'OutlinedButton(' in stripped) and i < len(lines) - 1:
