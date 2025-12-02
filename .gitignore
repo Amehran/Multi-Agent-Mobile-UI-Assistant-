@@ -26,6 +26,9 @@ venv/
 ENV/
 env/
 
+# Environment variables
+.env
+
 # uv
 .uv/
 # Keep uv.lock - it should be committed
