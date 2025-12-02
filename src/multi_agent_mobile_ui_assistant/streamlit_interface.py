@@ -383,9 +383,11 @@ def generate_preview_html(code: str) -> str:
     }
     
     lines = code.split('\n')
-    html = []
-    html.append('<div style="font-family: system-ui; padding: 20px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 10px;">')
-    html.append('<div style="background: white; padding: 20px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">')
+    html_content = []
+    html_content.append('<div style="font-family: system-ui; padding: 20px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 10px;">')
+    html_content.append('<div style="background: white; padding: 20px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">')
+    
+    import html
     
     for i, line in enumerate(lines):
         stripped = line.strip()
@@ -407,10 +409,10 @@ def generate_preview_html(code: str) -> str:
                 except:
                     pass
             
-            html.append(f'<div style="margin: 12px 0; padding: 12px; background: #fff3e0; border-left: 3px solid {colors["Icon"]}; border-radius: 4px; text-align: center;">')
-            html.append(f'<div style="font-size: 2em;">{icon_emoji}</div>')
-            html.append(f'<div style="font-size: 0.85em; color: #666; margin-top: 4px;">{icon_name}{size}</div>')
-            html.append('</div>')
+            html_content.append(f'<div style="margin: 12px 0; padding: 12px; background: #fff3e0; border-left: 3px solid {colors["Icon"]}; border-radius: 4px; text-align: center;">')
+            html_content.append(f'<div style="font-size: 2em;">{icon_emoji}</div>')
+            html_content.append(f'<div style="font-size: 0.85em; color: #666; margin-top: 4px;">{html.escape(icon_name)}{html.escape(size)}</div>')
+            html_content.append('</div>')
         
         # Spacer
         elif 'Spacer(' in stripped and 'Modifier' in stripped:
@@ -421,9 +423,9 @@ def generate_preview_html(code: str) -> str:
                 except:
                     pass
             
-            html.append(f'<div style="margin: 8px 0; padding: 8px; background: #f5f5f5; border-radius: 4px; text-align: center;">')
-            html.append(f'<span style="font-size: 0.75em; color: #999;">↕️ Spacer {height}</span>')
-            html.append('</div>')
+            html_content.append(f'<div style="margin: 8px 0; padding: 8px; background: #f5f5f5; border-radius: 4px; text-align: center;">')
+            html_content.append(f'<span style="font-size: 0.75em; color: #999;">↕️ Spacer {html.escape(height)}</span>')
+            html_content.append('</div>')
         
         # Text
         elif 'Text(' in stripped and 'TextField' not in stripped and not any(x in line for x in ['Button', 'label =', 'placeholder =']):
@@ -449,11 +451,11 @@ def generate_preview_html(code: str) -> str:
                         style = " • Small"
                         break
                 
-                html.append(f'<div style="margin: 12px 0; padding: 12px; background: #e3f2fd; border-left: 3px solid {colors["Text"]}; border-radius: 4px;">')
-                html.append(f'<div style="font-weight: 500;">"{text_content}"</div>')
+                html_content.append(f'<div style="margin: 12px 0; padding: 12px; background: #e3f2fd; border-left: 3px solid {colors["Text"]}; border-radius: 4px;">')
+                html_content.append(f'<div style="font-weight: 500;">"{html.escape(text_content)}"</div>')
                 if style:
-                    html.append(f'<div style="font-size: 0.75em; color: #666; margin-top: 4px;">{style}</div>')
-                html.append('</div>')
+                    html_content.append(f'<div style="font-size: 0.75em; color: #666; margin-top: 4px;">{style}</div>')
+                html_content.append('</div>')
         
         # TextField
         elif 'OutlinedTextField(' in stripped:
@@ -471,10 +473,10 @@ def generate_preview_html(code: str) -> str:
                     except:
                         pass
             
-            html.append(f'<div style="margin: 12px 0; padding: 14px; border: 2px solid {colors["TextField"]}; border-radius: 8px; background: white;">')
-            html.append(f'<div style="font-size: 0.7em; color: #666; margin-bottom: 6px;">{label}</div>')
-            html.append(f'<div style="color: #999;">✏️ {placeholder or "Enter text"}</div>')
-            html.append('</div>')
+            html_content.append(f'<div style="margin: 12px 0; padding: 14px; border: 2px solid {colors["TextField"]}; border-radius: 8px; background: white;">')
+            html_content.append(f'<div style="font-size: 0.7em; color: #666; margin-bottom: 6px;">{html.escape(label)}</div>')
+            html_content.append(f'<div style="color: #999;">✏️ {html.escape(placeholder) or "Enter text"}</div>')
+            html_content.append('</div>')
         
         # Button
         elif ('Button(' in stripped or 'OutlinedButton(' in stripped) and 'IconButton' not in stripped:
@@ -489,11 +491,11 @@ def generate_preview_html(code: str) -> str:
                     break
             
             if is_outlined:
-                html.append(f'<div style="margin: 12px 0; padding: 12px 24px; background: white; border: 2px solid {colors["Button"]}; color: {colors["Button"]}; border-radius: 8px; font-weight: 500; text-align: center;">')
+                html_content.append(f'<div style="margin: 12px 0; padding: 12px 24px; background: white; border: 2px solid {colors["Button"]}; color: {colors["Button"]}; border-radius: 8px; font-weight: 500; text-align: center;">')
             else:
-                html.append(f'<div style="margin: 12px 0; padding: 12px 24px; background: {colors["Button"]}; color: white; border-radius: 8px; font-weight: 500; text-align: center;">')
-            html.append(f'▶ {button_text}')
-            html.append('</div>')
+                html_content.append(f'<div style="margin: 12px 0; padding: 12px 24px; background: {colors["Button"]}; color: white; border-radius: 8px; font-weight: 500; text-align: center;">')
+            html_content.append(f'▶ {html.escape(button_text)}')
+            html_content.append('</div>')
         
         # HorizontalDivider (OR pattern)
         elif 'HorizontalDivider(' in stripped:
@@ -505,15 +507,15 @@ def generate_preview_html(code: str) -> str:
                     break
             
             if is_or and (i == 0 or 'HorizontalDivider' not in lines[i-1]):
-                html.append('<div style="margin: 16px 0; display: flex; align-items: center; gap: 12px;">')
-                html.append('<div style="flex: 1; height: 1px; background: #ddd;"></div>')
-                html.append('<span style="color: #666; font-weight: 500;">OR</span>')
-                html.append('<div style="flex: 1; height: 1px; background: #ddd;"></div>')
-                html.append('</div>')
+                html_content.append('<div style="margin: 16px 0; display: flex; align-items: center; gap: 12px;">')
+                html_content.append('<div style="flex: 1; height: 1px; background: #ddd;"></div>')
+                html_content.append('<span style="color: #666; font-weight: 500;">OR</span>')
+                html_content.append('<div style="flex: 1; height: 1px; background: #ddd;"></div>')
+                html_content.append('</div>')
     
-    html.append('</div>')
-    html.append('</div>')
-    return '\n'.join(html)
+    html_content.append('</div>')
+    html_content.append('</div>')
+    return '\n'.join(html_content)
 
 
 
