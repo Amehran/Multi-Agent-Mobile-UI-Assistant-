@@ -1,361 +1,189 @@
-# Multi-Agent Mobile UI Assistant
+# 📱 Multi-Agent Mobile UI Assistant
 
-A LangGraph-based multi-agent system that generates functional, high-quality Jetpack Compose UI code from natural language descriptions using Python 3.13 and `uv` package manager.
+[![Python 3.13](https://img.shields.io/badge/python-3.13-blue.svg)](https://www.python.org/downloads/)
+[![Streamlit](https://img.shields.io/badge/Streamlit-1.39-FF4B4B.svg)](https://streamlit.io)
+[![LangGraph](https://img.shields.io/badge/LangGraph-1.0-green.svg)](https://langchain-ai.github.io/langgraph/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-## Overview
+A powerful **LangGraph-based multi-agent system** that generates production-ready **Jetpack Compose UI code** from natural language descriptions or Figma designs. It features a modern Streamlit web interface for iterative refinement, real-time preview, and automated code validation.
 
-This project implements a sophisticated multi-agent workflow that takes natural language descriptions of mobile UI and generates production-ready Jetpack Compose code with accessibility and design review feedback.
+---
 
-## Architecture
+## 🚀 Key Features
 
-The system uses a **LangGraph-based multi-agent architecture** with the following flow:
+*   **🗣️ Natural Language to UI**: Describe your interface in plain English (e.g., "Login screen with email, password, and social login buttons") and get functional Compose code instantly.
+*   **🎨 Figma to Code**: Import designs directly from Figma using the **Figma MCP** integration. Extracts layout, colors, and typography automatically.
+*   **🤖 Multi-Agent Architecture**:
+    *   **Intent Parser**: Understands complex user requirements.
+    *   **Layout Planner**: Structures the UI hierarchy (Columns, Rows, Boxes).
+    *   **UI Generator**: Writes the actual Kotlin/Compose code.
+    *   **Accessibility Reviewer**: Checks for content descriptions, touch targets, and contrast.
+    *   **UI Reviewer**: Validates against Material 3 design guidelines.
+*   **🛠️ MCP Tools Integration**:
+    *   **Android Lint MCP**: Static analysis for common Compose errors (missing imports, modifier misuse).
+    *   **Gradle MCP**: Validates Kotlin compilation syntax.
+    *   **Figma MCP**: Connects to Figma API for design extraction.
+*   **✨ Interactive Refinement**: Use the Streamlit UI to chat with the agent and refine the code (e.g., "Make the button bigger", "Change the color scheme").
+*   **🛡️ Auto-Validation & Fix**: Automatically detects and fixes missing imports and syntax errors before showing you the code.
+*   **👁️ Visual Preview**: Generates a structural HTML preview of the Compose layout.
 
+---
+
+## 🏗️ Architecture
+
+The system uses a directed cyclic graph (LangGraph) to orchestrate specialized agents:
+
+```mermaid
+graph LR
+    User[User Input] --> Parser[Intent Parser]
+    Figma[Figma Design] --> Parser
+    Parser --> Planner[Layout Planner]
+    Planner --> Generator[UI Generator]
+    Generator --> Validator[Android Lint/Gradle MCP]
+    Validator -->|Errors| Generator
+    Validator -->|Pass| Reviewer1[Accessibility Agent]
+    Reviewer1 --> Reviewer2[Design Agent]
+    Reviewer2 --> Output[Final Code]
 ```
-User Input → Intent Parser Agent → Layout Planner Agent → UI Generator Agent 
-→ Accessibility Reviewer Agent → UI Reviewer Agent → Output Node
-```
 
-### Agent Roles
+---
 
-1. **Intent Parser Agent**: Extracts UI elements, layout hierarchy, styles, and actions from natural language
-2. **Layout Planner Agent**: Translates parsed intent into structured layout (Column, Row, Box, etc.)
-3. **UI Generator Agent**: Generates actual Jetpack Compose code
-4. **Accessibility Reviewer Agent**: Validates color contrast, content descriptions, and touch targets
-5. **UI Reviewer Agent**: Evaluates design against Material 3 guidelines
+## 🛠️ Installation
 
-## Features
+### Prerequisites
+*   **Python 3.13+**
+*   **uv** package manager (Recommended) or `pip`
+*   **Git**
 
-- **Natural Language Input**: Describe UIs in plain English
-- **Jetpack Compose Code Generation**: Produces functional Kotlin Compose code
-- **Multi-Agent Review System**: Automated accessibility and design review
-- **Material 3 Compliance**: Follows Material Design 3 guidelines
-- **Python 3.13**: Uses the latest Python version
-- **uv Package Manager**: Fast, modern Python package manager
-
-## Prerequisites
-
-- Python 3.13+
-- `uv` package manager
-
-## Installation
-
-### Install uv (if not already installed)
-
-```bash
-pip install uv
-```
-
-### Clone and Setup
-
+### 1. Clone the Repository
 ```bash
 git clone <repository-url>
 cd Multi-Agent-Mobile-UI-Assistant-
 ```
 
-### Install Dependencies
-
+### 2. Install Dependencies
+Using `uv` (fastest):
 ```bash
 uv sync
 ```
-
-This will create a virtual environment and install all dependencies.
-
-### Configure LLM Provider
-
-The system supports both **Ollama** (local) and **OpenAI** (cloud) as LLM providers.
-
-#### Option 1: Using Ollama (Local, Free)
-
-1. **Install Ollama**: Download from [ollama.ai](https://ollama.ai)
-
-2. **Pull a model**:
+Or using `pip`:
 ```bash
-ollama pull llama3.2
+pip install -r requirements.txt
 ```
 
-3. **Create `.env` file**:
+### 3. Configure Environment
+Create a `.env` file from the example:
 ```bash
 cp .env.example .env
 ```
 
-4. **Configure** (`.env`):
+Edit `.env` to configure your LLM provider and optional Figma credentials:
+
+**For Ollama (Local, Free):**
 ```env
 LLM_PROVIDER=ollama
 LLM_MODEL=llama3.2
 OLLAMA_BASE_URL=http://localhost:11434
 ```
 
-#### Option 2: Using OpenAI (Cloud)
-
-1. **Get API Key**: Get your key from [platform.openai.com/api-keys](https://platform.openai.com/api-keys)
-
-2. **Create `.env` file**:
-```bash
-cp .env.example .env
-```
-
-3. **Configure** (`.env`):
+**For OpenAI (Cloud, Best Quality):**
 ```env
 LLM_PROVIDER=openai
-LLM_MODEL=gpt-4o-mini
-OPENAI_API_KEY=your-api-key-here
+LLM_MODEL=gpt-4o
+OPENAI_API_KEY=sk-...
 ```
 
-**Available Models**:
-- Ollama: `llama3.2`, `llama3.1`, `mistral`, `codellama`, etc.
-- OpenAI: `gpt-4o`, `gpt-4o-mini`, `gpt-4`, `gpt-3.5-turbo`, etc.
+**For Figma Integration (Optional):**
+```env
+FIGMA_ACCESS_TOKEN=your_figma_token
+```
 
-## Usage
+---
+
+## 💻 Usage
 
 ### 🌐 Web Interface (Recommended)
-
-Launch the interactive Streamlit web UI for the best experience:
-
+Launch the interactive Streamlit app:
 ```bash
-python app.py
-# or directly:
+uv run python app.py
+```
+Or directly:
+```bash
 streamlit run src/multi_agent_mobile_ui_assistant/streamlit_interface.py
 ```
+Open **http://localhost:8501** in your browser.
 
-Then open your browser to the URL shown in the terminal (typically `http://localhost:8501`)
+**Web UI Features:**
+1.  **Generate**: Type a description or paste a Figma file key.
+2.  **Preview**: See a visual representation of the layout.
+3.  **Refine**: Chat with the agent to tweak the design.
+4.  **Validate**: View linting reports and auto-fix logs.
+5.  **Download**: Get the `.kt` file ready for Android Studio.
 
-**Features:**
-- 🎨 Generate UI from natural language
-- ✨ Iteratively refine generated code with feedback
-- 📜 Track complete iteration history
-- 👀 Live preview of code and reviews
-- 💡 Example prompts to get started
-- 📥 Download generated code
-- 🎯 Beautiful, responsive interface
-
-**Tips:**
-- Use the sidebar for example prompts
-- View history in a separate tab
-- Download code with one click
-- Session state persists during your session
-
-### 💻 Command Line Interface
-
+### ⌨️ CLI Mode
+Run the generator from the terminal:
 ```bash
 uv run main.py
 ```
 
-You'll be prompted to describe the UI you want to create. Examples:
-- "Create a login screen with username, password, and login button"
-- "Build a card with an image, title, and action button"
-- "Design a settings page with multiple options"
+---
 
-Press Enter without input to run the demo examples.
+## 🎨 Figma Integration
 
-### Run UI Generator Directly
+To use the Figma-to-Code feature:
 
-```bash
-uv run python -m src.multi_agent_mobile_ui_assistant.ui_generator
-```
+1.  Get a **Personal Access Token** from Figma (Settings > Account > Personal Access Tokens).
+2.  Add it to your `.env` file or enter it in the Streamlit sidebar.
+3.  Get the **File Key** from your Figma design URL:
+    `https://www.figma.com/file/abc123xyz/My-Design` -> Key is `abc123xyz`.
+4.  In the Streamlit app, check "Import from Figma" and enter the key.
 
-### Run Basic Examples (Learning)
+---
 
-The project includes basic LangGraph examples for learning:
-
-**Basic Example:**
-```bash
-uv run python -m src.multi_agent_mobile_ui_assistant.example
-```
-
-**Advanced Agent Example:**
-```bash
-uv run python -m src.multi_agent_mobile_ui_assistant.agent_example
-```
-
-## Project Structure
+## 📂 Project Structure
 
 ```
 .
-├── .python-version                         # Python version specification
-├── pyproject.toml                         # Project configuration and dependencies
-├── uv.lock                                # Locked dependency versions
-├── main.py                                # Main entry point (interactive UI generator)
-├── src/
-│   └── multi_agent_mobile_ui_assistant/
-│       ├── __init__.py                    # Package initialization
-│       ├── ui_generator.py                # Main UI generator (multi-agent system)
-│       ├── example.py                     # Basic LangGraph example (learning)
-│       └── agent_example.py               # Advanced agent example (learning)
-└── README.md                              # This file
+├── src/multi_agent_mobile_ui_assistant/
+│   ├── android_tools_mcp.py    # Linting & Compilation tools
+│   ├── figma_mcp.py            # Figma API integration
+│   ├── ui_generator.py         # Core LangGraph agent logic
+│   ├── streamlit_interface.py  # Web UI
+│   └── llm_config.py           # LLM provider setup
+├── tests/                      # Unit and integration tests
+├── app.py                      # Launcher script
+├── pyproject.toml              # Dependencies
+└── README.md                   # Documentation
 ```
 
-## How It Works
+---
 
-### 1. Intent Parser Agent
-Analyzes the natural language input and extracts:
-- UI elements (buttons, text, images, etc.)
-- Layout type (Column, Row, Card, etc.)
-- Styling requirements
-- User actions
+## 🧪 Testing
 
-### 2. Layout Planner Agent
-Creates a structured layout plan:
-- Determines root container type
-- Plans component hierarchy
-- Defines modifiers and arrangements
-- Sets alignment and spacing
-
-### 3. UI Generator Agent
-Generates Jetpack Compose code:
-- Creates @Composable function
-- Implements layout containers
-- Adds UI components with properties
-- Applies Material 3 theming
-
-### 4. Accessibility Reviewer Agent
-Validates accessibility:
-- Content descriptions for images
-- Touch target sizes (minimum 48dp)
-- Semantic properties for screen readers
-- Color contrast ratios
-
-### 5. UI Reviewer Agent
-Evaluates design quality:
-- Material 3 guideline compliance
-- Proper spacing and padding
-- Correct use of Arrangement and Alignment
-- Theme consistency
-
-### 6. Output Node
-Produces final deliverable:
-- Generated Jetpack Compose code
-- Accessibility review feedback
-- Design review recommendations
-
-## Example Output
-
-**Input:** "Create a card with an image, title text, and a button"
-
-**Output:**
-```kotlin
-@Composable
-fun GeneratedUI() {
-    Card(modifier = Modifier.fillMaxSize.padding(16.dp)) {
-        Image(
-            // Image implementation
-            contentDescription = "Sample image"
-        )
-        Text(
-            text = "Sample Text",
-            style = MaterialTheme.typography.headlineMedium
-        )
-        Button(onClick = { /* TODO: Add action */ }) {
-            Text("Click Me")
-        }
-    }
-}
-```
-
-Plus accessibility and design review feedback.
-
-## Dependencies
-
-- `langgraph>=1.0.3`: Core graph framework
-- `langchain-core>=1.0.4`: LangChain core functionality
-- `langchain-openai>=1.0.2`: OpenAI integration for LangChain
-- `langchain-ollama>=0.2.0`: Ollama integration for local LLMs
-- `python-dotenv>=1.0.0`: Environment variable management
-
-## LLM Provider Comparison
-
-| Feature | Ollama | OpenAI |
-|---------|--------|--------|
-| **Cost** | Free | Pay-per-use |
-| **Privacy** | Local, fully private | Cloud-based |
-| **Speed** | Depends on hardware | Fast |
-| **Quality** | Good (varies by model) | Excellent |
-| **Setup** | Install Ollama + models | API key only |
-| **Internet** | Not required | Required |
-
-**Recommendation**: 
-- Use **Ollama** for development, privacy, and no-cost operation
-- Use **OpenAI** for best quality and faster responses
-
-## Testing
-
-The project includes comprehensive unit tests for all modules.
-
-### Install Test Dependencies
-
-```bash
-uv sync --extra dev
-```
-
-### Run Tests
+Run the comprehensive test suite:
 
 ```bash
 # Run all tests
 uv run pytest
 
-# Run with coverage report
-uv run pytest --cov=src/multi_agent_mobile_ui_assistant --cov-report=term-missing
-
-# Run specific test file
-uv run pytest tests/test_ui_generator.py
-
-# Run with verbose output
-uv run pytest -v
+# Run with coverage
+uv run pytest --cov=src/multi_agent_mobile_ui_assistant
 ```
 
-### Test Coverage
+---
 
-The test suite includes:
-- **test_example.py**: Tests for basic LangGraph workflow (13 tests)
-- **test_agent_example.py**: Tests for advanced agent workflow (17 tests)
-- **test_ui_generator.py**: Tests for UI generator system (50+ tests)
+## 🤝 Contributing
 
-See [tests/README.md](tests/README.md) for detailed testing documentation.
+Contributions are welcome! Please read our [Contributing Guide](CONTRIBUTING.md) (coming soon).
 
-## Development
+1.  Fork the repo
+2.  Create a feature branch (`git checkout -b feature/amazing-feature`)
+3.  Commit your changes (`git commit -m 'Add amazing feature'`)
+4.  Push to the branch (`git push origin feature/amazing-feature`)
+5.  Open a Pull Request
 
-### Adding Dependencies
+---
 
-```bash
-uv add <package-name>
-```
+## 📄 License
 
-### Removing Dependencies
-
-```bash
-uv remove <package-name>
-```
-
-### Updating Dependencies
-
-```bash
-uv sync --upgrade
-```
-
-## Future Enhancements
-
-This is a basic starter implementation. Future enhancements could include:
-
-- **LLM Integration**: Connect to OpenAI, Anthropic, or other LLMs for better intent parsing
-- **Advanced UI Components**: Support for more Compose components (LazyColumn, Scaffold, etc.)
-- **State Management**: Generate ViewModels and state handling code
-- **Navigation**: Multi-screen app generation with navigation
-- **Custom Themes**: User-defined color schemes and typography
-- **Preview Generation**: Generate preview functions and screenshots
-- **File Export**: Write generated code to actual .kt files
-- **Interactive Refinement**: Allow users to refine generated code iteratively
-
-## Learning Resources
-
-The project includes example files demonstrating LangGraph concepts:
-- `example.py`: Basic state-based graph workflow
-- `agent_example.py`: Multi-tool agent orchestration
-
-These are useful for understanding LangGraph fundamentals before diving into the UI generator.
-
-## License
-
-MIT
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
+Distributed under the MIT License. See `LICENSE` for more information.
