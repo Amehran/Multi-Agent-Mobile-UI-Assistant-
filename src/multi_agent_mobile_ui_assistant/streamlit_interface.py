@@ -112,6 +112,7 @@ def extract_section(output: str, section_name: str) -> str:
     lines = output.split("\n")
     section_lines = []
     in_section = False
+    header_separator_skipped = False
     
     for line in lines:
         if section_name in line:
@@ -119,7 +120,11 @@ def extract_section(output: str, section_name: str) -> str:
             continue
         if in_section:
             if "=" * 10 in line:
-                break
+                if not header_separator_skipped:
+                    header_separator_skipped = True
+                    continue
+                else:
+                    break
             if line.strip().startswith("•"):
                 section_lines.append(line)
     
