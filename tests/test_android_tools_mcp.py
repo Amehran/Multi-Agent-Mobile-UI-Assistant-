@@ -8,7 +8,7 @@ Following TDD methodology:
 """
 
 from unittest.mock import patch, MagicMock
-from src.multi_agent_mobile_ui_assistant.android_tools_mcp import (
+from src.multi_agent_mobile_ui_assistant.mcp.android_tools import (
     AndroidLintMCP,
     GradleMCP,
     LintIssue,

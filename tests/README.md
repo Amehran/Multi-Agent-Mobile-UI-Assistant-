@@ -8,26 +8,10 @@ This directory contains comprehensive unit tests for the Multi-Agent Mobile UI A
 tests/
 ├── __init__.py                 # Test package initialization
 ├── conftest.py                 # Pytest configuration and shared fixtures
-├── test_example.py            # Tests for basic LangGraph example
-├── test_agent_example.py      # Tests for advanced agent example
 └── test_ui_generator.py       # Tests for UI generator module
 ```
 
 ## Test Coverage
-
-### test_example.py
-Tests for the basic LangGraph workflow (`src/multi_agent_mobile_ui_assistant/example.py`):
-- **TestNodeFunctions**: Tests for individual node functions (node_1, node_2, node_3)
-- **TestRouting**: Tests for conditional routing logic
-- **TestGraphBuilder**: Tests for graph building and execution
-- **TestStateType**: Tests for State TypedDict structure
-
-### test_agent_example.py
-Tests for the advanced agent workflow (`src/multi_agent_mobile_ui_assistant/agent_example.py`):
-- **TestAgentNodes**: Tests for agent node functions (analyze_task, execute_tool_1, execute_tool_2, synthesize_results)
-- **TestConditionalRouting**: Tests for agent conditional routing
-- **TestGraphBuilder**: Tests for agent graph building and execution
-- **TestAgentStateType**: Tests for AgentState TypedDict structure
 
 ### test_ui_generator.py
 Tests for the UI generator system (`src/multi_agent_mobile_ui_assistant/ui_generator.py`):
@@ -69,12 +53,6 @@ pytest --cov=src/multi_agent_mobile_ui_assistant --cov-report=html
 ### Run Specific Test Files
 
 ```bash
-# Run basic example tests
-pytest tests/test_example.py
-
-# Run agent example tests
-pytest tests/test_agent_example.py
-
 # Run UI generator tests
 pytest tests/test_ui_generator.py
 ```

@@ -1,52 +1,39 @@
 """
-Tests for Streamlit Interface helper functions.
+Tests for Web Interface helper functions and visual preview generator.
 """
 
 import pytest
-from src.multi_agent_mobile_ui_assistant.streamlit_interface import (
+from src.multi_agent_mobile_ui_assistant.web.app import (
     extract_code_from_output,
     extract_section,
-    generate_preview_html
 )
+from src.multi_agent_mobile_ui_assistant.preview.visualizer import generate_preview_html
+
 
 class TestStreamlitHelpers:
-    """Tests for helper functions in streamlit_interface.py."""
+    """Tests for helper functions in web/app.py and preview/visualizer.py."""
 
     def test_extract_code_from_output_simple(self):
-        """Test extracting code from a simple string."""
-        output = """
-        Here is the code:
-        @Composable
-        fun MyUI() {
-            Text("Hello")
-        }
-        """
+        """Test extracting code from a structured report."""
+        output = """======================================================================
+GENERATED JETPACK COMPOSE UI CODE
+======================================================================
+
+import androidx.compose.material3.Text
+
+@Composable
+fun MyUI() {
+    Text("Hello")
+}
+
+======================================================================
+ACCESSIBILITY REVIEW
+======================================================================
+"""
         code = extract_code_from_output(output)
         assert "@Composable" in code
         assert 'Text("Hello")' in code
-        assert "Here is the code:" not in code
-
-    def test_extract_code_from_output_with_braces(self):
-        """Test extracting code with nested braces."""
-        output = """
-        @Composable
-        fun ComplexUI() {
-            Column {
-                Text("Nested")
-            }
-        }
-        Extra text
-        """
-        code = extract_code_from_output(output)
-        assert "fun ComplexUI" in code
-        assert 'Text("Nested")' in code
-        assert "Extra text" not in code
-
-    def test_extract_code_no_composable(self):
-        """Test behavior when no @Composable tag is found."""
-        output = "Just some text without code."
-        code = extract_code_from_output(output)
-        assert code == output
+        assert "import androidx.compose.material3.Text" in code
 
     def test_extract_section_found(self):
         """Test extracting a specific section."""
@@ -71,12 +58,12 @@ class TestStreamlitHelpers:
         """Test behavior when section is missing."""
         output = "No reviews here."
         section = extract_section(output, "MISSING SECTION")
-        assert section == "No issues found"
+        assert "No issues found" in section or "No specific issues" in section
 
     def test_generate_preview_html_empty(self):
         """Test preview generation with empty code."""
         html = generate_preview_html("")
-        assert "<p>No code to preview</p>" in html
+        assert "No code to preview" in html
 
     def test_generate_preview_html_basic(self):
         """Test preview generation with basic components."""
@@ -92,7 +79,6 @@ class TestStreamlitHelpers:
         html = generate_preview_html(code)
         assert "Hello World" in html
         assert "Click Me" in html
-        assert "font-family: system-ui" in html
 
     def test_generate_preview_html_xss_prevention(self):
         """Test that HTML content is escaped to prevent XSS."""

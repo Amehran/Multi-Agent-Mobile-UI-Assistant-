@@ -8,15 +8,12 @@ The simplified architecture goes directly from user input to UI Generator.
 
 from unittest.mock import patch, MagicMock
 from langchain_core.messages import AIMessage
-from src.multi_agent_mobile_ui_assistant.ui_generator import (
-    UIGeneratorState,
-    ui_generator_agent,
-    accessibility_reviewer_agent,
-    ui_reviewer_agent,
-    output_node,
-    build_ui_generator_graph,
-    generate_ui_from_description,
-)
+from src.multi_agent_mobile_ui_assistant.core.state import UIGeneratorState
+from src.multi_agent_mobile_ui_assistant.agents.generator import ui_generator_agent
+from src.multi_agent_mobile_ui_assistant.agents.accessibility import accessibility_reviewer_agent
+from src.multi_agent_mobile_ui_assistant.agents.design_reviewer import ui_reviewer_agent
+from src.multi_agent_mobile_ui_assistant.core.graph import output_node, build_ui_generator_graph
+from src.multi_agent_mobile_ui_assistant.core.pipeline import generate_ui_from_description
 
 
 # ==============================================================================
@@ -336,37 +333,40 @@ class TestGraphBuilder:
 class TestGenerateUIFromDescription:
     """Tests for the main UI generation function."""
 
-    def test_generate_ui_from_description_returns_output(self):
+    def test_generate_ui_from_description_returns_output(self, mock_llm):
         """Test that generate_ui_from_description returns output."""
+        mock_llm.invoke.return_value = AIMessage(content="@Composable fun MyButton() { Button(onClick = {}) { Text(\"Click\") } }")
         result = generate_ui_from_description("Create a simple button")
         
         assert result is not None
         assert isinstance(result, str)
         assert len(result) > 0
 
-    def test_generate_ui_from_description_includes_code(self):
+    def test_generate_ui_from_description_includes_code(self, mock_llm):
         """Test that generated output includes Compose code."""
+        mock_llm.invoke.return_value = AIMessage(content="@Composable fun MyButton() { Button(onClick = {}) { Text(\"Click\") } }")
         result = generate_ui_from_description("Create a button")
         
         assert "@Composable" in result
-        # LLM generates appropriate function names based on context, not always "GeneratedUI"
         assert "fun " in result and "() {" in result
 
-    def test_generate_ui_from_description_includes_reviews(self):
+    def test_generate_ui_from_description_includes_reviews(self, mock_llm):
         """Test that generated output includes review sections."""
+        mock_llm.invoke.return_value = AIMessage(content="@Composable fun MyTextField() { OutlinedTextField(value = \"\", onValueChange = {}) }")
         result = generate_ui_from_description("Create a text field")
         
         assert "ACCESSIBILITY REVIEW" in result
         assert "DESIGN REVIEW" in result
 
-    def test_generate_ui_from_description_handles_complex_input(self):
+    def test_generate_ui_from_description_handles_complex_input(self, mock_llm):
         """Test generation with complex user input."""
+        mock_llm.invoke.return_value = AIMessage(content="@Composable fun LoginScreen() { Column { Text(\"Login\") } }")
         result = generate_ui_from_description(
             "Create a login screen with title, text fields, and button"
         )
         
         assert "@Composable" in result
-        assert len(result) > 100  # Should be a substantial output
+        assert len(result) > 100
 
 
 class TestUIGeneratorStateType:
@@ -410,7 +410,7 @@ class TestMCPIntegration:
         WHEN generating UI with examples as context
         THEN should use examples to improve generation quality
         """
-        from src.multi_agent_mobile_ui_assistant.mcp_tools import ComposeExample
+        from src.multi_agent_mobile_ui_assistant.mcp.github import ComposeExample
         
         # Mock LLM to return code
         mock_llm.invoke.return_value = AIMessage(content="@Composable fun MyScreen() {}")
@@ -478,7 +478,7 @@ class TestMCPIntegration:
         WHEN UI generator agent runs
         THEN should log that examples are being used
         """
-        from src.multi_agent_mobile_ui_assistant.mcp_tools import ComposeExample
+        from src.multi_agent_mobile_ui_assistant.mcp.github import ComposeExample
         
         mock_llm.invoke.return_value = AIMessage(content="@Composable fun Screen() {}")
         
@@ -577,13 +577,9 @@ class TestValidationPipeline:
         WHEN validation auto-fixes issues
         THEN should preserve generated components and add imports
         """
-        # Provide intent that should generate Text component
-        mock_llm.invoke.return_value = AIMessage(content="""{
-            "ui_elements": [{"type": "Text", "content": "Click"}],
-            "layout_type": "Column",
-            "styles": {},
-            "actions": []
-        }""")
+        mock_llm.invoke.return_value = AIMessage(
+            content="@Composable\nfun ClickScreen() {\n    Text(\"Click\")\n}"
+        )
         
         result = generate_ui_from_description(
             "Create text that says Click",
@@ -603,13 +599,9 @@ class TestValidationPipeline:
         WHEN validation runs on generated code  
         THEN should return compilation check results
         """
-        # Provide a simple valid intent - compilation check happens on generated code
-        mock_llm.invoke.return_value = AIMessage(content="""{
-            "ui_elements": [{"type": "Text", "content": "Test"}],
-            "layout_type": "Column",
-            "styles": {},
-            "actions": []
-        }""")
+        mock_llm.invoke.return_value = AIMessage(
+            content="@Composable\nfun TestScreen() {\n    Text(\"Test\")\n}"
+        )
         
         result = generate_ui_from_description(
             "Create text",

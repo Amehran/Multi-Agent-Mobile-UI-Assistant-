@@ -6,7 +6,7 @@ from Figma and converting them to Jetpack Compose code.
 """
 
 import pytest
-from src.multi_agent_mobile_ui_assistant.figma_mcp import (
+from src.multi_agent_mobile_ui_assistant.mcp.figma import (
     FigmaMCP,
     FigmaDesign,
     DesignToken,

@@ -15,7 +15,7 @@ sys.path.insert(0, str(src_path))
 @pytest.fixture
 def mock_llm():
     """Fixture providing a mocked LLM for testing without API calls."""
-    with patch('src.multi_agent_mobile_ui_assistant.ui_generator.get_default_llm') as mock:
+    with patch('src.multi_agent_mobile_ui_assistant.agents.generator.get_default_llm') as mock:
         mock_instance = Mock()
         mock.return_value = mock_instance
         yield mock_instance
@@ -27,69 +27,16 @@ def sample_ui_generator_state():
     return {
         "messages": [],
         "user_input": "Create a simple UI",
-        "parsed_intent": {},
-        "layout_plan": {},
         "generated_code": "",
         "accessibility_issues": [],
         "design_issues": [],
         "final_output": "",
-        "current_step": "start"
-    }
-
-
-@pytest.fixture
-def sample_agent_state():
-    """Fixture providing a sample AgentState."""
-    return {
-        "messages": [],
-        "current_task": "Test task",
-        "tools_used": [],
-        "is_complete": False
-    }
-
-
-@pytest.fixture
-def sample_basic_state():
-    """Fixture providing a sample basic State."""
-    return {
-        "messages": [],
-        "step_count": 0
-    }
-
-
-@pytest.fixture
-def sample_parsed_intent():
-    """Fixture providing a sample parsed intent."""
-    return {
-        "ui_elements": [
-            {"type": "Text", "content": "Hello", "style": "headlineMedium"},
-            {"type": "Button", "text": "Click Me", "action": "onClick"}
-        ],
-        "layout_type": "Column",
-        "styles": {},
-        "actions": []
-    }
-
-
-@pytest.fixture
-def sample_layout_plan():
-    """Fixture providing a sample layout plan."""
-    return {
-        "root_container": "Column",
-        "children": [
-            {
-                "component": "Text",
-                "properties": {"content": "Title", "style": "headlineMedium"},
-                "modifiers": []
-            },
-            {
-                "component": "Button",
-                "properties": {"text": "Submit"},
-                "modifiers": []
-            }
-        ],
-        "modifiers": ["fillMaxSize", "padding(16.dp)"],
-        "arrangement": "Center"
+        "current_step": "start",
+        "github_examples": [],
+        "project_context": {},
+        "multi_file": False,
+        "validate_code": False,
+        "use_llm_generation": False,
     }
 
 

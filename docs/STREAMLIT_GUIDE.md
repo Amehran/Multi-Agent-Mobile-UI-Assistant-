@@ -38,7 +38,7 @@ The Streamlit web interface provides a modern, intuitive way to generate and ite
 python app.py
 
 # Option 2: Direct Streamlit command
-streamlit run src/multi_agent_mobile_ui_assistant/streamlit_interface.py
+streamlit run src/multi_agent_mobile_ui_assistant/web/app.py
 
 # Option 3: With uv
 uv run python app.py
@@ -216,13 +216,13 @@ enableCORS = false
 ### Running on Different Port
 
 ```bash
-streamlit run src/multi_agent_mobile_ui_assistant/streamlit_interface.py --server.port 8080
+streamlit run src/multi_agent_mobile_ui_assistant/web/app.py --server.port 8080
 ```
 
 ### Running Headless (Server Mode)
 
 ```bash
-streamlit run src/multi_agent_mobile_ui_assistant/streamlit_interface.py --server.headless true
+streamlit run src/multi_agent_mobile_ui_assistant/web/app.py --server.headless true
 ```
 
 ## Troubleshooting

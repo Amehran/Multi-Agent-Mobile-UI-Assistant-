@@ -20,7 +20,7 @@ uv run pytest
 | `uv run pytest` | Run all tests |
 | `uv run pytest -v` | Verbose output |
 | `uv run pytest -x` | Stop on first failure |
-| `uv run pytest tests/test_example.py` | Run specific file |
+| `uv run pytest tests/test_ui_generator.py` | Run specific file |
 | `uv run pytest tests/test_ui_generator.py::TestIntentParserAgent` | Run specific class |
 | `uv run pytest --cov` | Run with coverage |
 | `./run_tests.sh -c -v` | Coverage + verbose (using script) |
@@ -30,8 +30,6 @@ uv run pytest
 ```
 tests/
 ├── conftest.py              # Shared fixtures
-├── test_example.py          # Basic workflow tests (13 tests)
-├── test_agent_example.py    # Agent workflow tests (17 tests)
 └── test_ui_generator.py     # UI generator tests (50+ tests)
 ```
 

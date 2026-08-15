@@ -1,26 +1,26 @@
-"""Main entry point for the Multi-Agent Mobile UI Assistant."""
+"""CLI Entrypoint for the Multi-Agent Mobile UI Assistant."""
 
-from src.multi_agent_mobile_ui_assistant.ui_generator import generate_ui_from_description
+from src.multi_agent_mobile_ui_assistant import generate_ui_from_description
 
 
 def main():
-    """Run the main application."""
+    """Run the CLI application."""
     print("=" * 70)
     print("Multi-Agent Mobile UI Assistant")
-    print("Jetpack Compose Code Generator")
+    print("Jetpack Compose Code Generator (CLI Mode)")
     print("=" * 70)
     print()
-    
-    # Example usage
+
     user_input = input("Describe the UI you want to create (or press Enter for demo): ").strip()
-    
+
     if not user_input:
-        # Run demo if no input provided
-        from src.multi_agent_mobile_ui_assistant.ui_generator import run_demo
-        run_demo()
+        demo_prompt = "Create a login screen with an app logo, email field, password field with visibility toggle, and sign-in button"
+        print(f"\nRunning with demo prompt: '{demo_prompt}'\n")
+        output = generate_ui_from_description(demo_prompt)
+        print(output)
     else:
-        # Generate UI from user input
-        generate_ui_from_description(user_input)
+        output = generate_ui_from_description(user_input)
+        print(output)
 
 
 if __name__ == "__main__":

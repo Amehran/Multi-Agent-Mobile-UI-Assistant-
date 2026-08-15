@@ -1,5 +1,5 @@
 """
-Tests for LLM Configuration Module.
+Tests for LLM Configuration Module (config/llm.py).
 """
 
 import os
@@ -52,7 +52,7 @@ class TestLLMConfig:
         """Test getting Ollama LLM instance."""
         config = LLMConfig(provider="ollama", model="llama2", temperature=0.8)
         llm = config.get_llm()
-        
+
         mock_chat_ollama.assert_called_once_with(
             model="llama2",
             temperature=0.8,
@@ -65,7 +65,7 @@ class TestLLMConfig:
         """Test getting OpenAI LLM instance."""
         config = LLMConfig(provider="openai", api_key="sk-test")
         llm = config.get_llm()
-        
+
         mock_chat_openai.assert_called_once_with(
             model="gpt-4o-mini",
             temperature=0.7,
@@ -95,7 +95,7 @@ class TestCreateLLM:
         }
         with patch.dict(os.environ, env_vars, clear=True):
             create_llm()
-            
+
             mock_config_cls.assert_called_once_with(
                 provider="openai",
                 model="gpt-4",
@@ -108,7 +108,7 @@ class TestCreateLLM:
         """Test arguments override environment variables."""
         with patch.dict(os.environ, {"LLM_PROVIDER": "ollama"}, clear=True):
             create_llm(provider="openai", model="gpt-3.5", temperature=0.9)
-            
+
             mock_config_cls.assert_called_once_with(
                 provider="openai",
                 model="gpt-3.5",
@@ -129,13 +129,11 @@ class TestGetDefaultLLM:
         """Test that create_llm is called only once."""
         mock_llm = MagicMock()
         mock_create.return_value = mock_llm
-        
-        # First call creates instance
+
         llm1 = get_default_llm()
         assert llm1 == mock_llm
         mock_create.assert_called_once()
-        
-        # Second call returns same instance
+
         llm2 = get_default_llm()
         assert llm2 == mock_llm
         mock_create.assert_called_once()

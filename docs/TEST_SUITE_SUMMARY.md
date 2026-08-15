@@ -6,53 +6,7 @@ I've created a comprehensive unit test suite for the Multi-Agent Mobile UI Assis
 
 ## Test Files Created
 
-### 1. `/tests/test_example.py` (13 tests)
-Tests for the basic LangGraph workflow (`example.py`):
-
-**Test Classes:**
-- `TestNodeFunctions` (6 tests)
-  - Tests node_1, node_2, node_3 increment step count correctly
-  - Tests nodes handle empty state gracefully
-  
-- `TestRouting` (3 tests)
-  - Tests routing logic to node_2 when step count < 2
-  - Tests routing logic to node_3 when step count >= 2
-  - Tests routing with empty state
-  
-- `TestGraphBuilder` (3 tests)
-  - Tests graph building and compilation
-  - Tests graph execution with initial state
-  - Tests complete workflow execution
-  
-- `TestStateType` (2 tests)
-  - Tests State TypedDict structure
-  - Tests State with messages
-
-### 2. `/tests/test_agent_example.py` (17 tests)
-Tests for the advanced agent workflow (`agent_example.py`):
-
-**Test Classes:**
-- `TestAgentNodes` (7 tests)
-  - Tests analyze_task adds analyzer tool
-  - Tests execute_tool_1 adds data_collector
-  - Tests execute_tool_2 adds data_processor
-  - Tests synthesize_results sets is_complete flag
-  - Tests tool preservation and message generation
-  
-- `TestConditionalRouting` (5 tests)
-  - Tests routing to tool_1, tool_2, and synthesize
-  - Tests edge cases with empty/missing tools
-  
-- `TestGraphBuilder` (4 tests)
-  - Tests graph building and compilation
-  - Tests complete workflow execution
-  - Tests all tools are used in workflow
-  
-- `TestAgentStateType` (2 tests)
-  - Tests AgentState TypedDict structure
-  - Tests AgentState with populated data
-
-### 3. `/tests/test_ui_generator.py` (50+ tests)
+### `/tests/test_ui_generator.py` (50+ tests)
 Tests for the UI generator system (`ui_generator.py`):
 
 **Test Classes:**
@@ -181,9 +135,6 @@ uv run pytest --cov=src/multi_agent_mobile_ui_assistant --cov-report=term-missin
 
 ### Run Specific Tests
 ```bash
-# Run specific file
-uv run pytest tests/test_example.py
-
 # Run specific class
 uv run pytest tests/test_ui_generator.py::TestIntentParserAgent
 

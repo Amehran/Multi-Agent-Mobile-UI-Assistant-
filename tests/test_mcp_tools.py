@@ -9,7 +9,7 @@ Following TDD methodology:
 
 import pytest
 from unittest.mock import Mock, patch
-from src.multi_agent_mobile_ui_assistant.mcp_tools import (
+from src.multi_agent_mobile_ui_assistant.mcp.github import (
     GitHubMCP,
     FileSystemMCP,
     ComposeExample,
@@ -51,7 +51,7 @@ class TestGitHubMCP:
         assert example.file_path == "samples/authentication/LoginScreen.kt"
         assert example.repo_url == "https://github.com/android/compose-samples"
     
-    @patch('src.multi_agent_mobile_ui_assistant.mcp_tools.Github')
+    @patch('src.multi_agent_mobile_ui_assistant.mcp.github.Github')
     def test_search_with_keywords_extraction(self, mock_github):
         """
         GIVEN a natural language query
@@ -83,7 +83,7 @@ class TestGitHubMCP:
         
         assert examples == []
     
-    @patch('src.multi_agent_mobile_ui_assistant.mcp_tools.Github')
+    @patch('src.multi_agent_mobile_ui_assistant.mcp.github.Github')
     def test_search_filters_compose_files_only(self, mock_github):
         """
         GIVEN search results with mixed file types
@@ -249,7 +249,7 @@ class TestFileSystemMCP:
 class TestMCPIntegration:
     """Integration tests for MCP tools working together."""
     
-    @patch('src.multi_agent_mobile_ui_assistant.mcp_tools.Github')
+    @patch('src.multi_agent_mobile_ui_assistant.mcp.github.Github')
     def test_github_and_filesystem_mcp_work_together(self, mock_github):
         """
         GIVEN GitHub examples and local project structure
@@ -286,7 +286,7 @@ class TestMCPIntegration:
         """
         github_mcp = GitHubMCP()
         
-        with patch('src.multi_agent_mobile_ui_assistant.mcp_tools.Github') as mock_github:
+        with patch('src.multi_agent_mobile_ui_assistant.mcp.github.Github') as mock_github:
             mock_github.side_effect = Exception("Network error")
             
             # Should not raise, should return empty list

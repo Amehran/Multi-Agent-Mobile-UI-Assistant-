@@ -14,36 +14,33 @@ A powerful **LangGraph-based multi-agent system** that generates production-read
 *   **🗣️ Natural Language to UI**: Describe your interface in plain English (e.g., "Login screen with email, password, and social login buttons") and get functional Compose code instantly.
 *   **🎨 Figma to Code**: Import designs directly from Figma using the **Figma MCP** integration. Extracts layout, colors, and typography automatically.
 *   **🤖 Multi-Agent Architecture**:
-    *   **Intent Parser**: Understands complex user requirements.
-    *   **Layout Planner**: Structures the UI hierarchy (Columns, Rows, Boxes).
-    *   **UI Generator**: Writes the actual Kotlin/Compose code.
-    *   **Accessibility Reviewer**: Checks for content descriptions, touch targets, and contrast.
-    *   **UI Reviewer**: Validates against Material 3 design guidelines.
+    *   **UI Generator Agent**: Direct Kotlin/Compose code synthesis enriched with few-shot context from MCP tools.
+    *   **Accessibility Reviewer Agent**: Checks for content descriptions, touch targets (48dp), and screen reader semantics.
+    *   **Material 3 Reviewer Agent**: Validates against Material 3 guidelines, theme tokens, and layout spacing.
 *   **🛠️ MCP Tools Integration**:
-    *   **Android Lint MCP**: Static analysis for common Compose errors (missing imports, modifier misuse).
+    *   **Android Lint MCP**: Static analysis for missing imports, modifier misuse, and auto-fix capabilities.
     *   **Gradle MCP**: Validates Kotlin compilation syntax.
-    *   **Figma MCP**: Connects to Figma API for design extraction.
-*   **✨ Interactive Refinement**: Use the Streamlit UI to chat with the agent and refine the code (e.g., "Make the button bigger", "Change the color scheme").
-*   **🛡️ Auto-Validation & Fix**: Automatically detects and fixes missing imports and syntax errors before showing you the code.
-*   **👁️ Visual Preview**: Generates a structural HTML preview of the Compose layout.
+    *   **Figma MCP**: Connects to Figma API for design token and layout extraction.
+    *   **GitHub MCP**: Searches android/compose-samples for real-world code patterns.
+*   **✨ Interactive Refinement**: Use the Streamlit UI to chat with the agent and iteratively refine the code.
+*   **🛡️ Auto-Validation & Fix**: Automatically detects and fixes missing imports and syntax issues.
+*   **👁️ Visual Preview**: Generates a structural HTML mockup of the Compose layout.
 
 ---
 
 ## 🏗️ Architecture
 
-The system uses a directed cyclic graph (LangGraph) to orchestrate specialized agents:
+The system uses a linear LangGraph pipeline with deterministic MCP tool auto-fixing:
 
 ```mermaid
 graph LR
-    User[User Input] --> Parser[Intent Parser]
-    Figma[Figma Design] --> Parser
-    Parser --> Planner[Layout Planner]
-    Planner --> Generator[UI Generator]
-    Generator --> Validator[Android Lint/Gradle MCP]
-    Validator -->|Errors| Generator
-    Validator -->|Pass| Reviewer1[Accessibility Agent]
-    Reviewer1 --> Reviewer2[Design Agent]
-    Reviewer2 --> Output[Final Code]
+    User[User Input] --> Generator[UI Generator Agent]
+    Figma[Figma MCP] -.-> Generator
+    GitHub[GitHub MCP] -.-> Generator
+    Generator --> Validator[Android Lint & Auto-Fix]
+    Validator --> Reviewer1[Accessibility Agent]
+    Reviewer1 --> Reviewer2[Material 3 Agent]
+    Reviewer2 --> Output[Final Compose Code]
 ```
 
 ---
@@ -109,7 +106,7 @@ uv run python app.py
 ```
 Or directly:
 ```bash
-streamlit run src/multi_agent_mobile_ui_assistant/streamlit_interface.py
+streamlit run src/multi_agent_mobile_ui_assistant/web/app.py
 ```
 Open **http://localhost:8501** in your browser.
 
@@ -145,14 +142,27 @@ To use the Figma-to-Code feature:
 ```
 .
 ├── src/multi_agent_mobile_ui_assistant/
-│   ├── android_tools_mcp.py    # Linting & Compilation tools
-│   ├── figma_mcp.py            # Figma API integration
-│   ├── ui_generator.py         # Core LangGraph agent logic
-│   ├── streamlit_interface.py  # Web UI
-│   └── llm_config.py           # LLM provider setup
-├── tests/                      # Unit and integration tests
-├── app.py                      # Launcher script
-├── pyproject.toml              # Dependencies
+│   ├── agents/                 # Specialized generation and review agents
+│   │   ├── generator.py        # UI Generator agent
+│   │   ├── accessibility.py    # Accessibility reviewer agent
+│   │   └── design_reviewer.py  # Material 3 reviewer agent
+│   ├── config/                 # LLM provider configuration
+│   │   └── llm.py
+│   ├── core/                   # State, graph builder & pipeline
+│   │   ├── state.py
+│   │   ├── graph.py
+│   │   └── pipeline.py
+│   ├── mcp/                    # MCP tools (Android Lint, Gradle, Figma, GitHub)
+│   │   ├── android_tools.py
+│   │   ├── figma.py
+│   │   └── github.py
+│   ├── preview/                # Visual layout preview mock
+│   │   └── visualizer.py
+│   └── web/                    # Streamlit web application
+│       └── app.py
+├── app.py                      # Web app launcher
+├── main.py                     # CLI entrypoint
+├── pyproject.toml              # Project dependencies
 └── README.md                   # Documentation
 ```
 
