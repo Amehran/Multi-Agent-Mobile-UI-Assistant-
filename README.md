@@ -14,14 +14,13 @@ A powerful **LangGraph-based multi-agent system** that generates production-read
 *   **🗣️ Natural Language to UI**: Describe your interface in plain English (e.g., "Login screen with email, password, and social login buttons") and get functional Compose code instantly.
 *   **🎨 Figma to Code**: Import designs directly from Figma using the **Figma MCP** integration. Extracts layout, colors, and typography automatically.
 *   **🤖 Multi-Agent Architecture**:
-    *   **Intent Parser**: Understands complex user requirements.
-    *   **Layout Planner**: Structures the UI hierarchy (Columns, Rows, Boxes).
-    *   **UI Generator**: Writes the actual Kotlin/Compose code.
+    *   **UI Generator**: A single LLM call that interprets the full request — concrete requirements and subjective style cues alike — and writes the Kotlin/Compose code directly.
+    *   **Validator**: Lints and compiles the generated code in-graph; on failure it loops back to the UI Generator with the specific error, up to 2 retries, before proceeding regardless of outcome.
     *   **Accessibility Reviewer**: Checks for content descriptions, touch targets, and contrast.
     *   **UI Reviewer**: Validates against Material 3 design guidelines.
 *   **🛠️ MCP Tools Integration**:
     *   **Android Lint MCP**: Static analysis for common Compose errors (missing imports, modifier misuse).
-    *   **Gradle MCP**: Validates Kotlin compilation syntax.
+    *   **Gradle MCP**: Validates Kotlin compilation (real `kotlinc` when available, heuristic fallback otherwise — see known limitation below).
     *   **Figma MCP**: Connects to Figma API for design extraction.
 *   **✨ Interactive Refinement**: Use the Streamlit UI to chat with the agent and refine the code (e.g., "Make the button bigger", "Change the color scheme").
 *   **🛡️ Auto-Validation & Fix**: Automatically detects and fixes missing imports and syntax errors before showing you the code.
@@ -35,16 +34,16 @@ The system uses a directed cyclic graph (LangGraph) to orchestrate specialized a
 
 ```mermaid
 graph LR
-    User[User Input] --> Parser[Intent Parser]
-    Figma[Figma Design] --> Parser
-    Parser --> Planner[Layout Planner]
-    Planner --> Generator[UI Generator]
-    Generator --> Validator[Android Lint/Gradle MCP]
-    Validator -->|Errors| Generator
-    Validator -->|Pass| Reviewer1[Accessibility Agent]
-    Reviewer1 --> Reviewer2[Design Agent]
-    Reviewer2 --> Output[Final Code]
+    User[User Input] --> Generator[UI Generator]
+    Figma[Figma Design] --> Generator
+    Generator --> Validator[Validator]
+    Validator -->|fail, retries remaining| Generator
+    Validator -->|pass or retries exhausted| Reviewer1[Accessibility Reviewer]
+    Reviewer1 --> Reviewer2[UI Reviewer]
+    Reviewer2 --> Output[Final Code + Trace + Verdicts]
 ```
+
+There is no separate Intent Parser or Layout Planner stage — a single LLM call in the UI Generator handles interpretation and layout together, which produced better results than splitting them.
 
 ---
 
@@ -120,6 +119,16 @@ Open **http://localhost:8501** in your browser.
 4.  **Validate**: View linting reports and auto-fix logs.
 5.  **Download**: Get the `.kt` file ready for Android Studio.
 
+> ⚠️ **Known limitation:** The "Compilation Check" in the Validation Report tries real `kotlinc` compilation when that binary is available on your `PATH`; if it isn't (the common case for this demo, since it doesn't require an Android/Kotlin toolchain to run), it falls back to a heuristic — brace/paren balance and basic import checks via Gradle MCP — which catches structural errors but cannot guarantee the code truly compiles. If validation still fails after the retry loop's 2 attempts, the code is shown anyway with the failing checks visible here.
+
+### 🎬 Curated Demo Prompts
+
+These 3 prompts each mix a concrete UI requirement with a subjective style cue, to show the agent genuinely interpreting intent rather than filling a template. They're available as one-click buttons in the sidebar and are the canonical prompts used throughout this project's demos:
+
+1. *"A login screen with an email field, a password field, and a login button — keep it minimal and calm, nothing loud."*
+2. *"A product card with an image, a title, a price, and an add-to-cart button, but make it feel energetic and playful."*
+3. *"A settings screen with toggle switches for notifications and dark mode, styled to feel trustworthy and professional, like a banking app."*
+
 ### ⌨️ CLI Mode
 Run the generator from the terminal:
 ```bash
@@ -147,7 +156,7 @@ To use the Figma-to-Code feature:
 ├── src/multi_agent_mobile_ui_assistant/
 │   ├── android_tools_mcp.py    # Linting & Compilation tools
 │   ├── figma_mcp.py            # Figma API integration
-│   ├── ui_generator.py         # Core LangGraph agent logic
+│   ├── ui_generator.py         # LangGraph pipeline: generator, validator retry loop, reviewers
 │   ├── streamlit_interface.py  # Web UI
 │   └── llm_config.py           # LLM provider setup
 ├── tests/                      # Unit and integration tests

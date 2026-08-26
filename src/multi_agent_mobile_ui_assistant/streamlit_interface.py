@@ -21,6 +21,15 @@ from src.multi_agent_mobile_ui_assistant.ui_generator import generate_ui_from_de
 from src.multi_agent_mobile_ui_assistant.llm_config import create_llm
 from src.multi_agent_mobile_ui_assistant.figma_mcp import FigmaMCP
 
+# The 3 curated demo prompts (CAP-8): each mixes a concrete UI requirement with a
+# subjective style cue, to demonstrate genuine interpretation rather than
+# template-filling. Keep this in sync with the copy documented in README.md.
+CURATED_DEMO_PROMPTS = [
+    "A login screen with an email field, a password field, and a login button — keep it minimal and calm, nothing loud.",
+    "A product card with an image, a title, a price, and an add-to-cart button, but make it feel energetic and playful.",
+    "A settings screen with toggle switches for notifications and dark mode, styled to feel trustworthy and professional, like a banking app.",
+]
+
 
 # Page configuration
 st.set_page_config(
@@ -713,6 +722,16 @@ def main():
         
         st.divider()
         
+        st.header("🎬 Curated Demo Prompts")
+        st.caption("Each mixes a concrete requirement with a subjective style cue.")
+
+        for i, prompt in enumerate(CURATED_DEMO_PROMPTS):
+            if st.button(prompt, key=f"curated_demo_{i}", use_container_width=True):
+                st.session_state.description_input = prompt
+                st.rerun()
+
+        st.divider()
+
         st.header("💡 Example Prompts")
         examples = [
             "Create a login screen with a logo, email field, password field, and login button",
