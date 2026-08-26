@@ -7,7 +7,9 @@ from unittest.mock import MagicMock, patch
 import pytest
 from src.multi_agent_mobile_ui_assistant.streamlit_interface import (
     extract_code_from_output,
+    generate_initial_ui,
     generate_preview_html,
+    refine_ui,
     render_check_results,
     render_review,
     render_trace_steps,
@@ -229,3 +231,95 @@ class TestRenderReview:
         with patch("src.multi_agent_mobile_ui_assistant.streamlit_interface.st") as mock_st:
             render_review("", "some prose")
             mock_st.subheader.assert_not_called()
+
+
+class TestGenerateInitialUiWiring:
+    """
+    Tests for generate_initial_ui's unpacking of generate_ui_from_description's
+    dict shape into session state -- the actual glue between story 2's producer
+    shapes and story 3's renderers, which no other test exercised together.
+    """
+
+    def test_unpacks_trace_and_check_results_into_session_state(self):
+        fixture = {
+            "code": "@Composable\nfun Screen() {}",
+            "validation_report": None,
+            "trace": [{"node": "ui_generator", "summary": "generated code", "detail": ""}],
+            "accessibility_issues": [{"check": "a11y", "status": "pass", "message": "ok"}],
+            "design_issues": [{"check": "design", "status": "warn", "message": "careful"}],
+            "validation_checks": [{"check": "compilation", "status": "pass", "message": "ok", "attempt": 0}],
+        }
+        with patch("src.multi_agent_mobile_ui_assistant.streamlit_interface.st") as mock_st, \
+             patch("src.multi_agent_mobile_ui_assistant.streamlit_interface.generate_ui_from_description",
+                   return_value=fixture) as mock_generate:
+            mock_st.session_state.get = lambda key, default=None: default
+            mock_st.session_state.history = []
+            mock_st.spinner.return_value.__enter__ = MagicMock(return_value=None)
+            mock_st.spinner.return_value.__exit__ = MagicMock(return_value=False)
+
+            generate_initial_ui("Create a screen")
+
+            mock_generate.assert_called_once()
+            assert mock_st.session_state.current_trace == fixture["trace"]
+            assert mock_st.session_state.current_accessibility == fixture["accessibility_issues"]
+            assert mock_st.session_state.current_design == fixture["design_issues"]
+            assert mock_st.session_state.current_validation_checks == fixture["validation_checks"]
+            assert mock_st.session_state.current_code == fixture["code"]
+
+    def test_multi_file_path_sets_check_fields_to_none_not_empty_list(self):
+        """
+        GIVEN multi_file=True, so generate_ui_from_description returns its own
+        dict-of-files contract (no trace/CheckResult keys)
+        WHEN generate_initial_ui unpacks it
+        THEN accessibility/design/validation_checks are set to None (never ran)
+        rather than [] (ran, found nothing) -- these render differently.
+        """
+        multi_file_output = {"Screen.kt": "@Composable\nfun Screen() {}"}
+        with patch("src.multi_agent_mobile_ui_assistant.streamlit_interface.st") as mock_st, \
+             patch("src.multi_agent_mobile_ui_assistant.streamlit_interface.generate_ui_from_description",
+                   return_value=multi_file_output):
+            mock_st.session_state.get = lambda key, default=None: (
+                True if key == "multi_file" else default
+            )
+            mock_st.session_state.history = []
+            mock_st.spinner.return_value.__enter__ = MagicMock(return_value=None)
+            mock_st.spinner.return_value.__exit__ = MagicMock(return_value=False)
+
+            generate_initial_ui("Create a multi-file project")
+
+            assert mock_st.session_state.current_accessibility is None
+            assert mock_st.session_state.current_design is None
+            assert mock_st.session_state.current_validation_checks is None
+
+
+class TestRefineUiClearsStaleTraceAndValidation:
+    """
+    refine_ui doesn't invoke the graph, so a prior generation's trace/
+    validation data no longer describes the refined code -- it must be
+    cleared, not left stale (previously it was left untouched, so the Trace
+    and Validation Report tabs kept showing pre-refine data as current).
+    """
+
+    def test_refine_resets_trace_and_validation_fields(self):
+        mock_llm = MagicMock()
+        mock_llm.invoke.return_value = MagicMock(content=(
+            '{"refined_code": "@Composable\\nfun Screen() {}", '
+            '"changes_made": ["tweak"], "accessibility_notes": [], "design_notes": []}'
+        ))
+        with patch("src.multi_agent_mobile_ui_assistant.streamlit_interface.st") as mock_st, \
+             patch("src.multi_agent_mobile_ui_assistant.streamlit_interface.get_llm_for_session",
+                   return_value=mock_llm):
+            mock_st.session_state.get = lambda key, default=None: default
+            mock_st.session_state.current_code = "@Composable\nfun Old() {}"
+            mock_st.session_state.current_trace = [{"node": "ui_generator", "summary": "x", "detail": ""}]
+            mock_st.session_state.current_validation_checks = [{"check": "compilation", "status": "pass", "message": "ok"}]
+            mock_st.session_state.validation_report = {"compilation": {"success": True}}
+            mock_st.session_state.history = [{"description": "prior", "iteration": 1}]
+            mock_st.spinner.return_value.__enter__ = MagicMock(return_value=None)
+            mock_st.spinner.return_value.__exit__ = MagicMock(return_value=False)
+
+            refine_ui("make it better")
+
+            assert mock_st.session_state.current_trace == []
+            assert mock_st.session_state.current_validation_checks is None
+            assert mock_st.session_state.validation_report is None

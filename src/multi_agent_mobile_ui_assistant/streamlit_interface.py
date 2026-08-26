@@ -120,23 +120,33 @@ def extract_code_from_output(output: str) -> str:
     return "\n".join(code_lines) if code_lines else output
 
 
-def render_check_results(title: str, checks: list) -> None:
+def render_check_results(title: str, checks) -> None:
     """
     Render a list of CheckResult dicts using a generic status-driven icon
     (pass -> st.success, warn -> st.warning, fail -> st.error). No message-text
     sniffing -- rendering is keyed only on the `status` field. Uses `.get()`
     with sensible defaults throughout so a malformed/missing key degrades
     gracefully instead of crashing the tab.
+
+    `checks=None` means the check never ran for this generation (e.g. Figma or
+    multi-file mode); `checks=[]` means it ran and found nothing -- these are
+    rendered with distinct messages so an empty result doesn't read as a false
+    "all clear."
     """
     if title:
         st.subheader(title)
+    if checks is None:
+        st.info("Not run for this generation mode.")
+        return
     if not checks:
         st.info("No checks recorded.")
         return
     icon_fns = {"pass": st.success, "warn": st.warning, "fail": st.error}
     for c in checks:
         icon_fn = icon_fns.get(c.get("status"), st.info)
-        icon_fn(c.get("message", ""))
+        attempt = c.get("attempt")
+        prefix = f"(attempt {attempt}) " if attempt is not None else ""
+        icon_fn(f"{prefix}{c.get('message', '')}")
 
 
 def render_trace_steps(title: str, steps: list) -> None:
@@ -166,7 +176,7 @@ def render_review(title: str, review) -> None:
     Dispatches on type so viewing Reviews after a Generate -> Refine sequence
     doesn't crash by iterating a string as if it were a list of dicts.
     """
-    if isinstance(review, list):
+    if review is None or isinstance(review, list):
         render_check_results(title, review)
     else:
         if title:
@@ -213,6 +223,10 @@ def generate_initial_ui(description: str):
             
             # If not using Figma or Figma failed, use standard generation
             if not figma_design:
+                # Sync the selected LLM from the UI into the global config
+                import src.multi_agent_mobile_ui_assistant.llm_config as llm_config
+                llm_config._default_llm = get_llm_for_session()
+
                 # Generate UI with options. `return_report` is requested
                 # unconditionally so trace/CheckResult data is always available
                 # for the Reviews/Trace tabs, regardless of validate/multi_file.
@@ -224,14 +238,15 @@ def generate_initial_ui(description: str):
                 )
 
                 if multi_file:
-                    # Multi-file returns its own dict-of-files contract --
-                    # no trace/CheckResult data is produced for this path.
+                    # Multi-file returns its own dict-of-files contract -- no
+                    # trace/CheckResult data is produced for this path. `None`
+                    # (not `[]`) marks "never run" distinctly from "ran clean".
                     code = output
                     validation_report = None
                     trace = []
-                    accessibility_issues = []
-                    design_issues = []
-                    validation_checks = []
+                    accessibility_issues = None
+                    design_issues = None
+                    validation_checks = None
                 else:
                     code = output['code']
                     validation_report = output.get('validation_report')
@@ -243,9 +258,9 @@ def generate_initial_ui(description: str):
                 # Figma design was used -- no trace/CheckResult data either.
                 validation_report = None
                 trace = []
-                accessibility_issues = []
-                design_issues = []
-                validation_checks = []
+                accessibility_issues = None
+                design_issues = None
+                validation_checks = None
 
             # Parse output
             if not multi_file and not figma_design:
@@ -393,10 +408,15 @@ Please refine the code based on this feedback."""
             design_review = "**Improvements Made:**\n" + "\n".join([f"• {note}" for note in design_notes])
             design_review += "\n\n**Changes Applied:**\n" + "\n".join([f"• {change}" for change in changes])
             
-            # Update session state
+            # Update session state. Refine doesn't invoke the graph, so the
+            # prior generation's trace/validation data no longer describes the
+            # current code -- clear it rather than leave it stale and misleading.
             st.session_state.current_code = refined_code
             st.session_state.current_accessibility = accessibility_review
             st.session_state.current_design = design_review
+            st.session_state.current_trace = []
+            st.session_state.current_validation_checks = None
+            st.session_state.validation_report = None
             st.session_state.iteration_count += 1
             
             # Add to history

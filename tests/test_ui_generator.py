@@ -1126,3 +1126,12 @@ class TestStructuredTraceAndVerdicts:
         assert len(compilation_checks) == 2
         assert any(c["status"] == "fail" for c in compilation_checks)
         assert any(c["status"] == "pass" for c in compilation_checks)
+
+        # Each attempt's CheckResults must carry which attempt produced them --
+        # otherwise a fail/pass pair from two different retries is indistinguishable.
+        attempts = {c["attempt"] for c in compilation_checks}
+        assert attempts == {0, 1}
+        failed = next(c for c in compilation_checks if c["status"] == "fail")
+        passed = next(c for c in compilation_checks if c["status"] == "pass")
+        assert failed["attempt"] == 0
+        assert passed["attempt"] == 1

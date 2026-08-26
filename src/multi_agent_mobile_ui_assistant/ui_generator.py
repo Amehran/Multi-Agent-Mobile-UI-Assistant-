@@ -19,11 +19,12 @@ node (validator, accessibility_reviewer, ui_reviewer) emits its findings as
 CheckResult verdicts (status: pass/fail/warn) instead of ad-hoc prose strings.
 """
 
-from typing import TypedDict, Annotated, Literal
+from typing import TypedDict, Annotated, Literal, NotRequired
 from langgraph.graph import StateGraph, END
 from langgraph.graph.message import add_messages
 from langchain_core.messages import SystemMessage, HumanMessage
 from .llm_config import get_default_llm
+from .android_tools_mcp import CompilationResult
 import json
 import operator
 
@@ -40,6 +41,7 @@ class CheckResult(TypedDict):
     check: str
     status: Literal["pass", "fail", "warn"]
     message: str
+    attempt: NotRequired[int]  # which validator pass produced this (0 = first attempt); validator-only
 
 
 class UIGeneratorState(TypedDict):
@@ -119,38 +121,28 @@ def ui_generator_agent(state: UIGeneratorState) -> UIGeneratorState:
             context_parts.append(f"\nExisting composables in project: {', '.join(composable_names)}")
         
         # Create detailed prompt for LLM
-        system_prompt = """You are an expert Jetpack Compose developer. Generate complete, production-ready Compose code.
+        system_prompt = """You are an expert Jetpack Compose developer. Generate complete, production-ready Compose code based on the user's request.
 
 CRITICAL RULES - FOLLOW EXACTLY:
 1. Generate ONLY valid Kotlin Jetpack Compose code
 2. Use Material3 components (androidx.compose.material3.*)
 3. Include ALL necessary imports at the top
-4. Use proper modifiers in THIS ORDER: .fillMaxWidth() THEN .padding() THEN .height()
-5. For TextFields, ALWAYS use OutlinedTextField with:
-   - var state by remember { mutableStateOf("") }
-   - value = state
-   - onValueChange = { state = it }
-   - label = { Text("Label") }
-   - placeholder = { Text("Hint text") }
-6. For spacing, ALWAYS use: Spacer(modifier = Modifier.height(XYdp))
-7. Use proper typography: MaterialTheme.typography.headlineLarge, bodyMedium, etc.
-8. For buttons: Button(onClick = {}, modifier = Modifier.fillMaxWidth().height(48.dp))
-9. Use Column with: verticalArrangement = Arrangement.Top, horizontalAlignment = Alignment.CenterHorizontally
-10. For password fields: visualTransformation = PasswordVisualTransformation()
-11. For icons: use Icon(imageVector = Icons.Default.IconName, contentDescription = "...")
-12. For dividers with text: Use Row with HorizontalDivider and Text
-13. MATCH THE EXACT COMPONENT COUNT: If user specifies 18 components, generate exactly 18 components
-14. PRESERVE EXACT SPACING: Use the exact dp values specified (24dp, 32dp, 16dp, 8dp)
-15. For images/logos: Use Icon() or Box() with specified size
+4. Use appropriate layout structures (Column, Row, Box) to match the requested design
+5. For TextFields, use OutlinedTextField or TextField with state hoisting
+6. Use proper typography: MaterialTheme.typography.headlineLarge, bodyMedium, etc.
+7. Use semantic names for your Composable functions and state variables
+8. Pay close attention to any exact requirements the user gives (spacing, colors, component count)
+9. Do NOT output a Login Screen unless specifically requested
+10. Do NOT output markdown explanations, just the Kotlin code block
 
-EXAMPLE STRUCTURE FOR LOGIN SCREEN:
+EXAMPLE STRUCTURE:
 ```kotlin
 @Composable
-fun LoginScreen() {
-    var email by remember { mutableStateOf("") }
-    var password by remember { mutableStateOf("") }
-    var passwordVisible by remember { mutableStateOf(false) }
+fun GeneratedScreen() {
+    // 1. Declare state variables if needed
+    var textValue by remember { mutableStateOf("") }
     
+    // 2. Main layout container
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -158,49 +150,37 @@ fun LoginScreen() {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Top
     ) {
-        // Logo
-        Icon(
-            imageVector = Icons.Default.AccountCircle,
-            contentDescription = "Logo",
-            modifier = Modifier.size(80.dp)
-        )
-        
-        Spacer(modifier = Modifier.height(24.dp))
-        
-        // Title
+        // 3. Components
         Text(
-            text = "Welcome Back",
-            style = MaterialTheme.typography.headlineLarge,
-            fontWeight = FontWeight.Bold
+            text = "Example Title",
+            style = MaterialTheme.typography.headlineLarge
         )
         
-        // Email TextField
-        OutlinedTextField(
-            value = email,
-            onValueChange = { email = it },
-            label = { Text("Email") },
-            placeholder = { Text("Enter your email") },
+        Spacer(modifier = Modifier.height(16.dp))
+        
+        Button(
+            onClick = { },
             modifier = Modifier.fillMaxWidth()
-        )
-        
-        // More components...
+        ) {
+            Text("Action Button")
+        }
     }
 }
 ```
 
-Generate code that EXACTLY matches the user's specifications."""
+Generate code that exactly implements the user's requirements."""
 
         # Build user message with all context
         user_message_parts = [
             "=== USER'S EXACT REQUIREMENTS ===",
             f"{user_input}",
             "\n=== YOUR TASK ===",
-            "Generate Jetpack Compose code that implements EVERY SINGLE ITEM listed above.",
+            "Generate Jetpack Compose code that implements the requirements above.",
             "\n=== MANDATORY CODE STRUCTURE ===",
         ]
         
         # Add step-by-step component generation instructions
-        user_message_parts.append("\n1. START WITH THESE IMPORTS (copy exactly):")
+        user_message_parts.append("\n1. START WITH THESE IMPORTS:")
         user_message_parts.append("""
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.text.KeyboardOptions
@@ -220,97 +200,17 @@ import androidx.compose.ui.unit.dp
 """)
         
         user_message_parts.append("\n2. FUNCTION SIGNATURE:")
-        user_message_parts.append("@Composable\nfun LoginScreen() {")
+        user_message_parts.append("@Composable\nfun GeneratedScreen() {")
         
-        user_message_parts.append("\n3. STATE VARIABLES (declare ALL text fields):")
-        user_message_parts.append("For EACH TextField in the requirements, add:")
-        user_message_parts.append("    var fieldName by remember { mutableStateOf(\"\") }")
-        user_message_parts.append("Example: var email by remember { mutableStateOf(\"\") }")
-        user_message_parts.append("Example: var password by remember { mutableStateOf(\"\") }")
-        user_message_parts.append("Example: var passwordVisible by remember { mutableStateOf(false) }")
+        user_message_parts.append("\n3. IMPLEMENT THE UI:")
+        user_message_parts.append("Translate the user requirements into Compose components. Use standard Material3 components like Text, Button, OutlinedTextField, Icon, Spacer, Column, Row, etc.")
         
-        user_message_parts.append(f"\n4. MAIN CONTAINER - Column:")
-        user_message_parts.append("""    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Top
-    ) {""")
-        
-        user_message_parts.append("\n5. IMPLEMENT EACH COMPONENT FROM USER'S LIST:")
-        user_message_parts.append("Go through EACH numbered item in the user requirements above and generate code.")
-        user_message_parts.append("\nCOMPONENT PATTERNS TO USE:")
-        
-        user_message_parts.append("""
-• Logo/Icon: Icon(imageVector = Icons.Default.AccountCircle, contentDescription = "Logo", modifier = Modifier.size(80.dp))
-• Spacing: Spacer(modifier = Modifier.height(24.dp))  ← Use EXACT dp value from requirements
-• Title Text: Text(text = "Welcome Back", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold)
-• Subtitle: Text(text = "Sign in to continue", style = MaterialTheme.typography.bodyMedium, color = Color.Gray)
-• Email Field:
-    OutlinedTextField(
-        value = email,
-        onValueChange = { email = it },
-        label = { Text("Email") },
-        placeholder = { Text("Enter your email") },
-        modifier = Modifier.fillMaxWidth()
-    )
-• Password Field:
-    OutlinedTextField(
-        value = password,
-        onValueChange = { password = it },
-        label = { Text("Password") },
-        placeholder = { Text("Enter your password") },
-        visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
-        trailingIcon = {
-            IconButton(onClick = { passwordVisible = !passwordVisible }) {
-                Icon(imageVector = if (passwordVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff, contentDescription = "Toggle")
-            }
-        },
-        modifier = Modifier.fillMaxWidth()
-    )
-• Clickable Text: Text(text = "Forgot Password?", modifier = Modifier.fillMaxWidth().clickable { }, textAlign = TextAlign.End, style = MaterialTheme.typography.bodySmall)
-• Button:
-    Button(
-        onClick = { },
-        modifier = Modifier.fillMaxWidth().height(48.dp),
-        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
-    ) {
-        Text("Sign In", color = Color.White)
-    }
-• Outlined Button:
-    OutlinedButton(
-        onClick = { },
-        modifier = Modifier.fillMaxWidth().height(48.dp)
-    ) {
-        Icon(imageVector = Icons.Default.Google, contentDescription = null)
-        Spacer(modifier = Modifier.width(8.dp))
-        Text("Continue with Google")
-    }
-• Divider with Text:
-    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-        HorizontalDivider(modifier = Modifier.weight(1f))
-        Text("OR", modifier = Modifier.padding(horizontal = 8.dp))
-        HorizontalDivider(modifier = Modifier.weight(1f))
-    }
-• Sign Up Row:
-    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
-        Text("Don't have an account? ")
-        Text("Sign Up", color = MaterialTheme.colorScheme.primary, modifier = Modifier.clickable { })
-    }
-""")
-        
-        user_message_parts.append("\n6. CLOSE THE FUNCTION:")
+        user_message_parts.append("\n4. CLOSE THE FUNCTION:")
         user_message_parts.append("    }\n}")
         
         user_message_parts.append(f"\n\n=== CRITICAL CHECKLIST ===")
-        user_message_parts.append("☐ Did you include ALL components from the requirements?")
-        user_message_parts.append("☐ Did you use the EXACT spacing values (24dp, 32dp, 16dp, 8dp)?")
-        user_message_parts.append("☐ Did you use OutlinedTextField (not Text) for input fields?")
-        user_message_parts.append("☐ Did you add password visibility toggle?")
-        user_message_parts.append("☐ Did you make clickable texts clickable with .clickable { }?")
-        user_message_parts.append("☐ Did you use .fillMaxWidth() for buttons and fields?")
-        user_message_parts.append("☐ Did you match ALL text labels exactly?")
+        user_message_parts.append("☐ Did you implement ALL components from the requirements?")
+        user_message_parts.append("☐ Did you use appropriate Jetpack Compose layout structures (Column, Row, Box)?")
         
         if context_parts:
             user_message_parts.append("\n=== REFERENCE EXAMPLES ===")
@@ -753,14 +653,16 @@ def validator_node(state: UIGeneratorState) -> UIGeneratorState:
         }
         return {"current_step": "validation_skipped", "trace": [skip_trace_step]}
 
-    from .android_tools_mcp import AndroidLintMCP, CompilationResult, GradleMCP
-
     generated_code = state.get("generated_code", "")
     print("\n[Validator] Running Android Tools MCP checks...")
 
     retry_count = state.get("retry_count", 0)
+    attempt = retry_count
+    lint_issues = []
 
     try:
+        from .android_tools_mcp import AndroidLintMCP, GradleMCP
+
         lint_mcp = AndroidLintMCP()
         gradle_mcp = GradleMCP()
 
@@ -778,7 +680,6 @@ def validator_node(state: UIGeneratorState) -> UIGeneratorState:
     except Exception as exc:
         print(f"[Validator] Validation raised an exception: {exc}; treating as a failed attempt")
         fixed_code = generated_code
-        lint_issues = []
         compilation_result = CompilationResult(
             success=False,
             errors=[f"Validator raised an exception: {exc}"],
@@ -804,6 +705,7 @@ def validator_node(state: UIGeneratorState) -> UIGeneratorState:
             "check": "lint",
             "status": severity_to_status.get(issue.severity, "warn"),
             "message": f"{issue.message} (line {issue.line})",
+            "attempt": attempt,
         }
         for issue in lint_issues
     ]
@@ -815,6 +717,7 @@ def validator_node(state: UIGeneratorState) -> UIGeneratorState:
             if compilation_result.success
             else ("; ".join(compilation_result.errors) or "Compilation failed")
         ),
+        "attempt": attempt,
     })
 
     trace_step: TraceStep = {

@@ -2,13 +2,15 @@
 LLM Configuration Module
 
 This module handles LLM provider selection and initialization.
-Supports both OpenAI and Ollama providers.
+Supports OpenAI, Ollama, Google, and Anthropic providers.
 """
 
 import os
 from typing import Literal
 from langchain_openai import ChatOpenAI
 from langchain_ollama import ChatOllama
+from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_anthropic import ChatAnthropic
 from langchain_core.language_models.chat_models import BaseChatModel
 from dotenv import load_dotenv
 
@@ -16,7 +18,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
-LLMProvider = Literal["openai", "ollama"]
+LLMProvider = Literal["openai", "ollama", "google", "anthropic", "custom"]
 
 
 class LLMConfig:
@@ -34,10 +36,10 @@ class LLMConfig:
         Initialize LLM configuration.
         
         Args:
-            provider: LLM provider to use ("openai" or "ollama")
+            provider: LLM provider to use ("openai", "ollama", "google", "anthropic")
             model: Model name (defaults based on provider)
             temperature: Temperature for generation (0.0 to 1.0)
-            api_key: API key for OpenAI (optional, reads from env)
+            api_key: API key for OpenAI/Google/Anthropic (optional, reads from env)
             base_url: Base URL for Ollama (optional, defaults to localhost)
         """
         self.provider = provider
@@ -45,18 +47,30 @@ class LLMConfig:
         
         # Set default models based on provider
         if model is None:
-            self.model = "gpt-4o-mini" if provider == "openai" else "llama3.2"
+            if provider == "openai":
+                self.model = "gpt-4o-mini"
+            elif provider == "google":
+                self.model = "gemini-1.5-pro"
+            elif provider == "anthropic":
+                self.model = "claude-3-5-sonnet-20240620"
+            else:
+                self.model = "llama3.2"
         else:
             self.model = model
         
-        # Set API key for OpenAI
+        # Set API key based on provider
         if provider == "openai":
             self.api_key = api_key or os.getenv("OPENAI_API_KEY")
             if not self.api_key:
-                raise ValueError(
-                    "OpenAI API key required. Set OPENAI_API_KEY environment variable "
-                    "or pass api_key parameter."
-                )
+                raise ValueError("OpenAI API key required.")
+        elif provider == "google":
+            self.api_key = api_key or os.getenv("GOOGLE_API_KEY")
+            if not self.api_key:
+                raise ValueError("Google API key required.")
+        elif provider == "anthropic":
+            self.api_key = api_key or os.getenv("ANTHROPIC_API_KEY")
+            if not self.api_key:
+                raise ValueError("Anthropic API key required.")
         
         # Set base URL for Ollama
         if provider == "ollama":
@@ -81,12 +95,24 @@ class LLMConfig:
                 temperature=self.temperature,
                 base_url=self.base_url,
             )
+        elif self.provider == "google":
+            return ChatGoogleGenerativeAI(
+                model=self.model,
+                temperature=self.temperature,
+                google_api_key=self.api_key,
+            )
+        elif self.provider == "anthropic":
+            return ChatAnthropic(
+                model_name=self.model,
+                temperature=self.temperature,
+                api_key=self.api_key,
+            )
         else:
             raise ValueError(f"Unsupported provider: {self.provider}")
 
 
 def create_llm(
-    provider: LLMProvider | None = None,
+    provider: str | None = None,
     model: str | None = None,
     temperature: float = 0.7,
 ) -> BaseChatModel:
@@ -97,19 +123,12 @@ def create_llm(
     environment variables if not provided.
     
     Args:
-        provider: LLM provider ("openai" or "ollama")
+        provider: LLM provider
         model: Model name
         temperature: Generation temperature
         
     Returns:
         Configured LangChain chat model
-        
-    Environment Variables:
-        LLM_PROVIDER: Default provider (default: "ollama")
-        LLM_MODEL: Default model name
-        LLM_TEMPERATURE: Default temperature
-        OPENAI_API_KEY: OpenAI API key (required for OpenAI)
-        OLLAMA_BASE_URL: Ollama server URL (default: http://localhost:11434)
     """
     # Read from environment if not provided
     if provider is None:
@@ -124,7 +143,7 @@ def create_llm(
     
     # Create and return LLM
     config = LLMConfig(
-        provider=provider,
+        provider=provider, # type: ignore
         model=model,
         temperature=temperature,
     )
