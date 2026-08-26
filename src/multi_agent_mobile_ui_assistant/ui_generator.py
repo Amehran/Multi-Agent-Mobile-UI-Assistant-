@@ -19,11 +19,12 @@ node (validator, accessibility_reviewer, ui_reviewer) emits its findings as
 CheckResult verdicts (status: pass/fail/warn) instead of ad-hoc prose strings.
 """
 
-from typing import TypedDict, Annotated, Literal
+from typing import TypedDict, Annotated, Literal, NotRequired
 from langgraph.graph import StateGraph, END
 from langgraph.graph.message import add_messages
 from langchain_core.messages import SystemMessage, HumanMessage
 from .llm_config import get_default_llm
+from .android_tools_mcp import CompilationResult
 import json
 import operator
 
@@ -40,6 +41,7 @@ class CheckResult(TypedDict):
     check: str
     status: Literal["pass", "fail", "warn"]
     message: str
+    attempt: NotRequired[int]  # which validator pass produced this (0 = first attempt); validator-only
 
 
 class UIGeneratorState(TypedDict):
@@ -753,14 +755,16 @@ def validator_node(state: UIGeneratorState) -> UIGeneratorState:
         }
         return {"current_step": "validation_skipped", "trace": [skip_trace_step]}
 
-    from .android_tools_mcp import AndroidLintMCP, CompilationResult, GradleMCP
-
     generated_code = state.get("generated_code", "")
     print("\n[Validator] Running Android Tools MCP checks...")
 
     retry_count = state.get("retry_count", 0)
+    attempt = retry_count
+    lint_issues = []
 
     try:
+        from .android_tools_mcp import AndroidLintMCP, GradleMCP
+
         lint_mcp = AndroidLintMCP()
         gradle_mcp = GradleMCP()
 
@@ -778,7 +782,6 @@ def validator_node(state: UIGeneratorState) -> UIGeneratorState:
     except Exception as exc:
         print(f"[Validator] Validation raised an exception: {exc}; treating as a failed attempt")
         fixed_code = generated_code
-        lint_issues = []
         compilation_result = CompilationResult(
             success=False,
             errors=[f"Validator raised an exception: {exc}"],
@@ -804,6 +807,7 @@ def validator_node(state: UIGeneratorState) -> UIGeneratorState:
             "check": "lint",
             "status": severity_to_status.get(issue.severity, "warn"),
             "message": f"{issue.message} (line {issue.line})",
+            "attempt": attempt,
         }
         for issue in lint_issues
     ]
@@ -815,6 +819,7 @@ def validator_node(state: UIGeneratorState) -> UIGeneratorState:
             if compilation_result.success
             else ("; ".join(compilation_result.errors) or "Compilation failed")
         ),
+        "attempt": attempt,
     })
 
     trace_step: TraceStep = {

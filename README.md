@@ -20,7 +20,7 @@ A powerful **LangGraph-based multi-agent system** that generates production-read
     *   **UI Reviewer**: Validates against Material 3 design guidelines.
 *   **🛠️ MCP Tools Integration**:
     *   **Android Lint MCP**: Static analysis for common Compose errors (missing imports, modifier misuse).
-    *   **Gradle MCP**: Validates Kotlin compilation (real `kotlinc` when available, heuristic fallback otherwise — see known limitation below).
+    *   **Gradle MCP**: Validates Kotlin compilation with a fast heuristic first, only trying real `kotlinc` when the heuristic finds nothing (see known limitation below).
     *   **Figma MCP**: Connects to Figma API for design extraction.
 *   **✨ Interactive Refinement**: Use the Streamlit UI to chat with the agent and refine the code (e.g., "Make the button bigger", "Change the color scheme").
 *   **🛡️ Auto-Validation & Fix**: Automatically detects and fixes missing imports and syntax errors before showing you the code.
@@ -119,7 +119,7 @@ Open **http://localhost:8501** in your browser.
 4.  **Validate**: View linting reports and auto-fix logs.
 5.  **Download**: Get the `.kt` file ready for Android Studio.
 
-> ⚠️ **Known limitation:** The "Compilation Check" in the Validation Report tries real `kotlinc` compilation when that binary is available on your `PATH`; if it isn't (the common case for this demo, since it doesn't require an Android/Kotlin toolchain to run), it falls back to a heuristic — brace/paren balance and basic import checks via Gradle MCP — which catches structural errors but cannot guarantee the code truly compiles. If validation still fails after the retry loop's 2 attempts, the code is shown anyway with the failing checks visible here.
+> ⚠️ **Known limitation:** The "Compilation Check" in the Validation Report always runs a fast heuristic first (brace/paren balance, basic import checks via Gradle MCP). Only if that heuristic finds nothing does it additionally try real `kotlinc` compilation — and only when that binary is available on your `PATH` (not required to run this demo). This means a real compile error the heuristic doesn't catch can still slip through if `kotlinc` isn't installed; the check cannot guarantee the code truly compiles in that case. If validation still fails after the retry loop's 2 attempts, the code is shown anyway with the failing checks visible here.
 
 ### 🎬 Curated Demo Prompts
 
