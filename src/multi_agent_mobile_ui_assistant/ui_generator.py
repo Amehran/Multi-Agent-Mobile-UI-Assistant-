@@ -5,7 +5,7 @@ This module implements a LangGraph-based multi-agent system that generates
 functional, high-quality Jetpack Compose UI code from natural language descriptions.
 
 Simplified Agent Flow (leveraging LLM capabilities):
-User Input → UI Generator → Accessibility Reviewer → UI Reviewer → Output
+User Input → UI Generator → Validator (⟲ bounded retry back to UI Generator) → Accessibility Reviewer → UI Reviewer → Output
 
 MCP Tools enhance each stage:
 - GitHub MCP: Provides real-world Compose examples for context
@@ -35,6 +35,11 @@ class UIGeneratorState(TypedDict):
     project_context: dict  # MCP: Existing project info
     multi_file: bool  # MCP: Generate multiple files
     validate_code: bool  # Android Tools MCP: Run validation
+    retry_count: int  # In-graph validator: number of regeneration retries used
+    last_validation_errors: list[str]  # In-graph validator: compilation errors from the last failed attempt
+    lint_issues: list  # In-graph validator: LintIssue objects from the last validation pass
+    auto_fixed: bool  # In-graph validator: whether lint issues were found and an auto-fix pass was attempted
+    compilation_result: object  # In-graph validator: CompilationResult from the last validation pass
 
 
 # ============================================================================
@@ -291,13 +296,22 @@ import androidx.compose.ui.unit.dp
         
         user_message_parts.append("\n\n=== OUTPUT FORMAT ===")
         user_message_parts.append("Return ONLY the complete Kotlin code. Start with imports, end with closing brace. NO explanations, NO markdown fences.")
-        
+
+        # Splice in feedback from a previous failed validation attempt (retry loop)
+        last_validation_errors = state.get("last_validation_errors")
+        if last_validation_errors:
+            user_message_parts.append("\n\n=== PREVIOUS ATTEMPT FAILED VALIDATION ===")
+            user_message_parts.append("Your previous generation failed compilation with these errors:")
+            for error in last_validation_errors:
+                user_message_parts.append(f"  - {error}")
+            user_message_parts.append("Fix these specific issues in this new generation while still meeting all requirements above.")
+
         user_message = "\n".join(user_message_parts)
         
         # Call LLM to generate code
-        from langchain_core.messages import SystemMessage, HumanMessage
-        from .llm_config import get_default_llm
-        
+        # (uses the module-level SystemMessage/HumanMessage/get_default_llm imports so
+        # that tests patching `ui_generator.get_default_llm` -- e.g. the `mock_llm`
+        # fixture -- actually take effect; a local re-import here would shadow them)
         llm = get_default_llm()
         messages = [
             SystemMessage(content=system_prompt),
@@ -374,15 +388,6 @@ import androidx.compose.ui.unit.dp
                 "arrangement": "Center"
             }
             generated_code = _generate_template_code(layout_plan)
-    
-    # Apply validation if requested
-    if state.get("validate_code"):
-        from .android_tools_mcp import AndroidLintMCP
-        
-        print("[UI Generator] Applying validation and auto-fix...")
-        lint_mcp = AndroidLintMCP()
-        generated_code = lint_mcp.auto_fix(generated_code)
-        print("[UI Generator] Code validated and auto-fixed")
     
     return {
         "messages": [{"role": "assistant", "content": "UI code generation complete"}],
@@ -612,36 +617,145 @@ def output_node(state: UIGeneratorState) -> UIGeneratorState:
 
 
 # ============================================================================
+# Node: Validator (in-graph, bounded retry loop)
+# ============================================================================
+
+MAX_VALIDATION_RETRIES = 2
+
+
+def validator_node(state: UIGeneratorState) -> UIGeneratorState:
+    """
+    Validator Node: Single source of validation truth for generated code.
+
+    When `validate_code` is falsy, this node is a pure pass-through (no lint/compile
+    calls, no retry side effects) so non-validating callers see no behavior change.
+
+    When `validate_code` is true, it runs AndroidLintMCP.validate_compose_code,
+    conditionally AndroidLintMCP.auto_fix, then GradleMCP.check_compilation. If
+    compilation fails and `retry_count` hasn't hit the cap, it bumps `retry_count`
+    and records `last_validation_errors` so the conditional edge can route back to
+    `ui_generator` for a regeneration attempt informed by the failure. Once
+    compilation succeeds, or the retry cap is reached, the graph proceeds forward
+    regardless of outcome so the demo always completes.
+
+    If the lint/auto-fix/compile calls themselves raise (e.g. a bug in the MCP
+    tools), that is treated the same as a failed compilation attempt -- it must
+    never crash the graph and block demo completion.
+    """
+    if not state.get("validate_code"):
+        return {"current_step": "validation_skipped"}
+
+    from .android_tools_mcp import AndroidLintMCP, CompilationResult, GradleMCP
+
+    generated_code = state.get("generated_code", "")
+    print("\n[Validator] Running Android Tools MCP checks...")
+
+    retry_count = state.get("retry_count", 0)
+
+    try:
+        lint_mcp = AndroidLintMCP()
+        gradle_mcp = GradleMCP()
+
+        lint_issues = lint_mcp.validate_compose_code(generated_code)
+        print(f"[Validator] Found {len(lint_issues)} lint issues")
+
+        if lint_issues:
+            print("[Validator] Applying auto-fix...")
+            fixed_code = lint_mcp.auto_fix(generated_code)
+        else:
+            fixed_code = generated_code
+
+        compilation_result = gradle_mcp.check_compilation(fixed_code)
+        print(f"[Validator] Compilation: {'SUCCESS' if compilation_result.success else 'FAILED'}")
+    except Exception as exc:
+        print(f"[Validator] Validation raised an exception: {exc}; treating as a failed attempt")
+        fixed_code = generated_code
+        lint_issues = []
+        compilation_result = CompilationResult(
+            success=False,
+            errors=[f"Validator raised an exception: {exc}"],
+            warnings=[]
+        )
+
+    if not compilation_result.success and retry_count < MAX_VALIDATION_RETRIES:
+        retry_count += 1
+        last_validation_errors = list(compilation_result.errors)
+        current_step = "validation_failed_retry"
+        print(f"[Validator] Compilation failed, retrying ({retry_count}/{MAX_VALIDATION_RETRIES})...")
+    elif not compilation_result.success:
+        last_validation_errors = list(compilation_result.errors)
+        current_step = "validated"
+        print("[Validator] Retries exhausted, proceeding forward anyway")
+    else:
+        last_validation_errors = []
+        current_step = "validated"
+
+    return {
+        "generated_code": fixed_code,
+        "lint_issues": lint_issues,
+        "auto_fixed": bool(lint_issues),
+        "compilation_result": compilation_result,
+        "retry_count": retry_count,
+        "last_validation_errors": last_validation_errors,
+        "current_step": current_step,
+    }
+
+
+def route_after_validation(state: UIGeneratorState) -> Literal["retry", "continue"]:
+    """
+    Conditional edge: route back to `ui_generator` when the validator just flagged
+    a retryable compilation failure; otherwise continue forward to the reviewers.
+    """
+    if state.get("current_step") == "validation_failed_retry":
+        return "retry"
+    return "continue"
+
+
+# ============================================================================
 # Graph Builder
 # ============================================================================
 
 def build_ui_generator_graph() -> StateGraph:
     """
-    Build and return the simplified UI generator graph.
-    
-    Flow: User Input → UI Generator → Accessibility Reviewer → UI Reviewer → Output
-    
+    Build and return the UI generator graph.
+
+    Flow: User Input → UI Generator → Validator (⟲ bounded retry) → Accessibility Reviewer → UI Reviewer → Output
+
     This simplified architecture removes redundant preprocessing (Intent Parser, Layout Planner)
     and lets the LLM handle intent understanding and layout planning directly, which produces
     better results. MCP tools still enhance each stage with real-world examples and validation.
+
+    The `validator` node is the single in-graph validation path: when `validate_code` is
+    true and compilation fails, a conditional edge loops back to `ui_generator` (carrying
+    failure feedback into the prompt) up to `MAX_VALIDATION_RETRIES` times before proceeding
+    forward regardless of outcome.
     """
     workflow = StateGraph(UIGeneratorState)
-    
+
     # Add agent nodes (simplified pipeline)
     workflow.add_node("ui_generator", ui_generator_agent)
+    workflow.add_node("validator", validator_node)
     workflow.add_node("accessibility_reviewer", accessibility_reviewer_agent)
     workflow.add_node("ui_reviewer", ui_reviewer_agent)
     workflow.add_node("output", output_node)
-    
+
     # Set entry point - go directly to UI Generator
     workflow.set_entry_point("ui_generator")
-    
-    # Define the simplified linear flow
-    workflow.add_edge("ui_generator", "accessibility_reviewer")
+
+    # Define the flow, with a bounded retry loop through the validator
+    workflow.add_edge("ui_generator", "validator")
+    workflow.add_conditional_edges(
+        "validator",
+        route_after_validation,
+        {
+            "retry": "ui_generator",
+            "continue": "accessibility_reviewer",
+        },
+    )
     workflow.add_edge("accessibility_reviewer", "ui_reviewer")
     workflow.add_edge("ui_reviewer", "output")
     workflow.add_edge("output", END)
-    
+
     return workflow
 
 
@@ -700,69 +814,48 @@ def generate_ui_from_description(
         "github_examples": github_examples or [],
         "project_context": project_context or {},
         "multi_file": multi_file,
-        "validate_code": validate
+        "validate_code": validate,
+        "retry_count": 0,
+        "last_validation_errors": [],
+        "lint_issues": [],
+        "auto_fixed": False,
+        "compilation_result": None
     }
-    
-    # Execute the workflow
+
+    # Execute the workflow (validation, auto-fix, and the bounded retry loop
+    # all happen in-graph via the `validator` node when validate_code is True)
     result = app.invoke(initial_state)
-    
+
     # Get the output
     final_output = result.get("final_output", "")
     generated_code = result.get("generated_code", "")
-    
-    # Apply validation if requested
-    if validate:
-        from .android_tools_mcp import AndroidLintMCP, GradleMCP
-        
-        print("\n[Validation] Running Android Tools MCP checks...")
-        lint_mcp = AndroidLintMCP()
-        gradle_mcp = GradleMCP()
-        
-        # Extract code from final output
-        code_to_validate = generated_code if generated_code else final_output
-        
-        # Run lint validation
-        lint_issues = lint_mcp.validate_compose_code(code_to_validate)
-        print(f"[Validation] Found {len(lint_issues)} lint issues")
-        
-        # Auto-fix if issues found
-        if lint_issues:
-            print("[Validation] Applying auto-fix...")
-            fixed_code = lint_mcp.auto_fix(code_to_validate)
-        else:
-            fixed_code = code_to_validate
-        
-        # Check compilation
-        compilation_result = gradle_mcp.check_compilation(fixed_code)
-        print(f"[Validation] Compilation: {'SUCCESS' if compilation_result.success else 'FAILED'}")
-        
-        # Update output with fixed code
-        final_output = fixed_code
-        
-        # Return with report if requested
-        if return_report:
-            return {
-                "code": fixed_code,
-                "validation_report": {
-                    "lint_issues": [
-                        {
-                            "severity": issue.severity,
-                            "message": issue.message,
-                            "line": issue.line,
-                            "suggestion": issue.suggestion
-                        }
-                        for issue in lint_issues
-                    ],
-                    "lint_issues_count": len(lint_issues),
-                    "auto_fixed": len(lint_issues) > 0,
-                    "compilation": {
-                        "success": compilation_result.success,
-                        "errors": compilation_result.errors,
-                        "warnings": compilation_result.warnings
+
+    # Assemble the validation report from final graph state if requested
+    if validate and return_report:
+        lint_issues = result.get("lint_issues", [])
+        compilation_result = result.get("compilation_result")
+        return {
+            "code": generated_code,
+            "validation_report": {
+                "lint_issues": [
+                    {
+                        "severity": issue.severity,
+                        "message": issue.message,
+                        "line": issue.line,
+                        "suggestion": issue.suggestion
                     }
+                    for issue in lint_issues
+                ],
+                "lint_issues_count": len(lint_issues),
+                "auto_fixed": result.get("auto_fixed", False),
+                "compilation": {
+                    "success": compilation_result.success if compilation_result else True,
+                    "errors": compilation_result.errors if compilation_result else [],
+                    "warnings": compilation_result.warnings if compilation_result else []
                 }
             }
-    
+        }
+
     # Return based on multi_file flag
     if multi_file:
         # Parse and return multiple files

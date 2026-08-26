@@ -121,6 +121,12 @@ class TestGetDefaultLLM:
         import src.multi_agent_mobile_ui_assistant.llm_config as module
         module._default_llm = None
 
+    def teardown_method(self):
+        """Reset singleton after each test so the mocked instance doesn't
+        leak into other test modules that call get_default_llm()."""
+        import src.multi_agent_mobile_ui_assistant.llm_config as module
+        module._default_llm = None
+
     @patch("src.multi_agent_mobile_ui_assistant.llm_config.create_llm")
     def test_singleton_behavior(self, mock_create):
         """Test that create_llm is called only once."""

@@ -14,6 +14,8 @@ from src.multi_agent_mobile_ui_assistant.ui_generator import (
     accessibility_reviewer_agent,
     ui_reviewer_agent,
     output_node,
+    validator_node,
+    route_after_validation,
     build_ui_generator_graph,
     generate_ui_from_description,
 )
@@ -385,9 +387,14 @@ class TestUIGeneratorStateType:
             "github_examples": [],
             "project_context": {},
             "multi_file": False,
-            "validate_code": False
+            "validate_code": False,
+            "retry_count": 0,
+            "last_validation_errors": [],
+            "lint_issues": [],
+            "auto_fixed": False,
+            "compilation_result": None
         }
-        
+
         assert "messages" in state
         assert "user_input" in state
         assert "generated_code" in state
@@ -399,6 +406,8 @@ class TestUIGeneratorStateType:
         assert "project_context" in state
         assert "multi_file" in state
         assert "validate_code" in state
+        assert "retry_count" in state
+        assert "last_validation_errors" in state
 
 
 class TestMCPIntegration:
@@ -548,14 +557,17 @@ class TestValidationPipeline:
         assert "validation_report" in result
         assert "lint_issues" in result["validation_report"]
     
-    def test_ui_generator_agent_applies_auto_fix(self, mock_llm):
+    def test_ui_generator_agent_no_longer_auto_fixes(self, mock_llm):
         """
-        GIVEN generated code with lint issues
-        WHEN ui_generator_agent runs with validation
-        THEN should apply auto_fix to generated code
+        GIVEN generated code with lint issues (missing imports)
+        WHEN ui_generator_agent runs with validate_code=True
+        THEN it should NOT apply auto_fix itself -- that is now the validator
+        node's job, exclusively, in the compiled graph (single validation path).
         """
-        mock_llm.invoke.return_value = AIMessage(content="@Composable fun Screen() {}")
-        
+        mock_llm.invoke.return_value = AIMessage(
+            content="@Composable\nfun Screen() { Text(\"Hi\") }"
+        )
+
         state = {
             "user_input": "Create screen",
             "messages": [],
@@ -564,35 +576,220 @@ class TestValidationPipeline:
             "project_context": {},
             "multi_file": False
         }
-        
+
         result = ui_generator_agent(state)
-        
-        # Should have validated and fixed code
+
+        # The raw LLM output already starts with "@Composable" so the
+        # "missing imports" fallback prepend doesn't trigger either --
+        # the agent should return the code completely untouched by lint/auto-fix.
         code = result.get("generated_code", "")
-        assert "import" in code or "@Composable" in code
-    
+        assert code == "@Composable\nfun Screen() { Text(\"Hi\") }"
+        assert "import androidx.compose.material3.Text" not in code
+        assert "import androidx.compose.runtime.Composable" not in code
+
+    def test_validator_node_pass_through_when_validation_disabled(self):
+        """
+        GIVEN validate_code is False (or absent)
+        WHEN validator_node runs
+        THEN it makes no lint/compile calls and produces no retry side effects
+        """
+        state = {
+            "validate_code": False,
+            "generated_code": "@Composable\nfun Screen() { Text(\"Hi\") }",
+            "retry_count": 0,
+        }
+
+        result = validator_node(state)
+
+        assert result == {"current_step": "validation_skipped"}
+
+    def test_validator_node_passes_valid_code_without_retry(self):
+        """
+        GIVEN validate_code is True and the code compiles on the first try
+        WHEN validator_node runs
+        THEN retry_count stays at 0 and last_validation_errors is empty
+        """
+        state = {
+            "validate_code": True,
+            "generated_code": "@Composable\nfun Screen() { Text(\"Hi\") }",
+            "retry_count": 0,
+        }
+
+        result = validator_node(state)
+
+        assert result["retry_count"] == 0
+        assert result["last_validation_errors"] == []
+        assert result["current_step"] == "validated"
+        assert result["compilation_result"].success is True
+
+    def test_validator_node_flags_retry_on_compilation_failure(self):
+        """
+        GIVEN validate_code is True and the code fails compilation (unbalanced braces)
+        WHEN validator_node runs and retry_count is below the cap
+        THEN retry_count increments, last_validation_errors is populated, and
+        current_step signals a retryable failure
+        """
+        state = {
+            "validate_code": True,
+            "generated_code": "@Composable\nfun Screen() { Text(\"Hi\")",  # missing closing brace
+            "retry_count": 0,
+        }
+
+        result = validator_node(state)
+
+        assert result["retry_count"] == 1
+        assert result["last_validation_errors"]
+        assert result["current_step"] == "validation_failed_retry"
+
+    def test_validator_node_exhausts_retries_and_proceeds(self):
+        """
+        GIVEN validate_code is True, the code keeps failing compilation, and
+        retry_count is already at the cap (2)
+        WHEN validator_node runs
+        THEN it does not increment retry_count further and signals to proceed
+        forward anyway (demo must always complete)
+        """
+        state = {
+            "validate_code": True,
+            "generated_code": "@Composable\nfun Screen() { Text(\"Hi\")",
+            "retry_count": 2,
+        }
+
+        result = validator_node(state)
+
+        assert result["retry_count"] == 2
+        assert result["last_validation_errors"]
+        assert result["current_step"] == "validated"
+
+    def test_route_after_validation_retries_on_failed_step(self):
+        assert route_after_validation({"current_step": "validation_failed_retry"}) == "retry"
+
+    def test_route_after_validation_continues_otherwise(self):
+        assert route_after_validation({"current_step": "validated"}) == "continue"
+        assert route_after_validation({"current_step": "validation_skipped"}) == "continue"
+
+    def test_retry_loop_fails_once_then_passes(self, mock_llm):
+        """
+        GIVEN the first generation attempt fails compilation and the second succeeds
+        WHEN the compiled graph runs with validate_code=True
+        THEN retry_count reaches 1, the second ui_generator call's prompt includes
+        the failure feedback, and the graph completes with the fixed code
+        """
+        bad_code = "@Composable\nfun Screen() { Text(\"Hi\")"  # unbalanced braces -> fails
+        good_code = (
+            "import androidx.compose.runtime.Composable\n"
+            "import androidx.compose.material3.Text\n\n"
+            "@Composable\nfun Screen() { Text(\"Hi\") }"
+        )
+        mock_llm.invoke.side_effect = [
+            AIMessage(content=bad_code),
+            AIMessage(content=good_code),
+        ]
+
+        app = build_ui_generator_graph().compile()
+        initial_state = {
+            "messages": [],
+            "user_input": "Create screen",
+            "generated_code": "",
+            "accessibility_issues": [],
+            "design_issues": [],
+            "final_output": "",
+            "current_step": "start",
+            "github_examples": [],
+            "project_context": {},
+            "multi_file": False,
+            "validate_code": True,
+            "retry_count": 0,
+            "last_validation_errors": [],
+        }
+
+        result = app.invoke(initial_state)
+
+        assert result["retry_count"] == 1
+        assert result["current_step"] == "complete"
+        assert mock_llm.invoke.call_count == 2
+
+        # The retried (second) call's prompt must carry the failure feedback --
+        # not just the static header, but the actual error text from the
+        # failed compilation (bad_code has 1 open brace and 0 close braces).
+        second_call_messages = mock_llm.invoke.call_args_list[1][0][0]
+        second_user_message = second_call_messages[1].content
+        assert "PREVIOUS ATTEMPT FAILED VALIDATION" in second_user_message
+        assert "Unbalanced braces: 1 open, 0 close" in second_user_message
+
+    def test_retry_loop_exhausts_and_completes(self, mock_llm):
+        """
+        GIVEN generation fails compilation on every attempt
+        WHEN the compiled graph runs with validate_code=True
+        THEN the graph still completes (never hangs/errors) once retry_count
+        reaches the cap of 2, with last_validation_errors populated
+        """
+        bad_code = "@Composable\nfun Screen() { Text(\"Hi\")"  # always unbalanced
+        mock_llm.invoke.return_value = AIMessage(content=bad_code)
+
+        app = build_ui_generator_graph().compile()
+        initial_state = {
+            "messages": [],
+            "user_input": "Create screen",
+            "generated_code": "",
+            "accessibility_issues": [],
+            "design_issues": [],
+            "final_output": "",
+            "current_step": "start",
+            "github_examples": [],
+            "project_context": {},
+            "multi_file": False,
+            "validate_code": True,
+            "retry_count": 0,
+            "last_validation_errors": [],
+        }
+
+        result = app.invoke(initial_state)
+
+        assert result["retry_count"] == 2
+        assert result["last_validation_errors"]
+        assert result["current_step"] == "complete"
+        assert mock_llm.invoke.call_count == 3  # initial attempt + 2 retries
+
+    def test_generate_ui_from_description_retries_exhausted_still_returns(self, mock_llm):
+        """
+        GIVEN validate=True, return_report=True, and code that fails every attempt
+        WHEN generate_ui_from_description runs
+        THEN it returns (does not hang/raise) and the validation report reflects
+        the failed compilation
+        """
+        bad_code = "@Composable\nfun Screen() { Text(\"Hi\")"
+        mock_llm.invoke.return_value = AIMessage(content=bad_code)
+
+        result = generate_ui_from_description(
+            "Create screen",
+            validate=True,
+            return_report=True
+        )
+
+        assert isinstance(result, dict)
+        assert result["validation_report"]["compilation"]["success"] is False
+
+
     def test_validation_preserves_code_functionality(self, mock_llm):
         """
-        GIVEN generated code through full workflow
-        WHEN validation auto-fixes issues
+        GIVEN generated code missing imports through the full workflow
+        WHEN the in-graph validator auto-fixes lint issues
         THEN should preserve generated components and add imports
         """
-        # Provide intent that should generate Text component
-        mock_llm.invoke.return_value = AIMessage(content="""{
-            "ui_elements": [{"type": "Text", "content": "Click"}],
-            "layout_type": "Column",
-            "styles": {},
-            "actions": []
-        }""")
-        
+        mock_llm.invoke.return_value = AIMessage(content="""@Composable
+fun ClickScreen() {
+    Text(text = "Click")
+}""")
+
         result = generate_ui_from_description(
             "Create text that says Click",
             validate=True
         )
-        
+
         # Generated code should have Text component
         assert "Text" in result
-        # Validation should add imports
+        # Validator's auto-fix should add missing imports
         assert "import androidx.compose" in result
         # Should have the Composable function
         assert "@Composable" in result
