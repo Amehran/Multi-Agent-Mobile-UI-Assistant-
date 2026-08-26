@@ -19,6 +19,7 @@ from src.multi_agent_mobile_ui_assistant.ui_generator import (
     build_ui_generator_graph,
     generate_ui_from_description,
 )
+from src.multi_agent_mobile_ui_assistant.android_tools_mcp import LintIssue, CompilationResult
 
 
 # ==============================================================================
@@ -166,10 +167,11 @@ class TestAccessibilityReviewerAgent:
         }
         
         result = accessibility_reviewer_agent(state)
-        
+
         issues = result["accessibility_issues"]
         # Should detect missing contentDescription
-        assert any("contentDescription" in issue for issue in issues)
+        assert any("contentDescription" in issue["message"] for issue in issues)
+        assert any(issue["status"] == "fail" for issue in issues)
 
     def test_accessibility_reviewer_checks_button_size(self):
         """Test that reviewer checks button touch target sizes."""
@@ -218,9 +220,10 @@ class TestUIReviewerAgent:
         }
         
         result = ui_reviewer_agent(state)
-        
+
         issues = result["design_issues"]
-        assert any("MaterialTheme" in issue for issue in issues)
+        assert any("MaterialTheme" in issue["message"] for issue in issues)
+        assert any(issue["status"] == "warn" for issue in issues)
 
     def test_ui_reviewer_approves_padding(self):
         """Test that UI reviewer approves padding usage."""
@@ -230,9 +233,10 @@ class TestUIReviewerAgent:
         }
         
         result = ui_reviewer_agent(state)
-        
+
         issues = result["design_issues"]
-        assert any("padding" in issue.lower() for issue in issues)
+        assert any("padding" in issue["message"].lower() for issue in issues)
+        assert any(issue["check"] == "padding" and issue["status"] == "pass" for issue in issues)
 
     def test_ui_reviewer_sets_current_step(self):
         """Test that UI reviewer sets current_step."""
@@ -253,13 +257,13 @@ class TestOutputNode:
         """Test that output node creates final output."""
         state = {
             "generated_code": "@Composable\nfun Test() { }",
-            "accessibility_issues": ["Issue 1"],
-            "design_issues": ["Issue 2"],
+            "accessibility_issues": [{"check": "overall", "status": "pass", "message": "Issue 1"}],
+            "design_issues": [{"check": "overall", "status": "pass", "message": "Issue 2"}],
             "messages": [],
         }
-        
+
         result = output_node(state)
-        
+
         assert "final_output" in result
         assert len(result["final_output"]) > 0
 
@@ -271,22 +275,25 @@ class TestOutputNode:
             "design_issues": [],
             "messages": [],
         }
-        
+
         result = output_node(state)
-        
+
         assert "TEST_CODE_123" in result["final_output"]
 
     def test_output_node_includes_accessibility_issues(self):
         """Test that output includes accessibility issues."""
         state = {
             "generated_code": "code",
-            "accessibility_issues": ["Accessibility Issue 1", "Accessibility Issue 2"],
+            "accessibility_issues": [
+                {"check": "check_1", "status": "fail", "message": "Accessibility Issue 1"},
+                {"check": "check_2", "status": "warn", "message": "Accessibility Issue 2"},
+            ],
             "design_issues": [],
             "messages": [],
         }
-        
+
         result = output_node(state)
-        
+
         assert "Accessibility Issue 1" in result["final_output"]
         assert "Accessibility Issue 2" in result["final_output"]
 
@@ -295,12 +302,12 @@ class TestOutputNode:
         state = {
             "generated_code": "code",
             "accessibility_issues": [],
-            "design_issues": ["Design Issue 1"],
+            "design_issues": [{"check": "check_1", "status": "warn", "message": "Design Issue 1"}],
             "messages": [],
         }
-        
+
         result = output_node(state)
-        
+
         assert "Design Issue 1" in result["final_output"]
 
     def test_output_node_sets_current_step(self):
@@ -378,10 +385,12 @@ class TestUIGeneratorStateType:
         """Test that UIGeneratorState has expected structure (simplified architecture)."""
         state: UIGeneratorState = {
             "messages": [],
+            "trace": [],
             "user_input": "test",
             "generated_code": "",
             "accessibility_issues": [],
             "design_issues": [],
+            "validation_checks": [],
             "final_output": "",
             "current_step": "start",
             "github_examples": [],
@@ -396,10 +405,12 @@ class TestUIGeneratorStateType:
         }
 
         assert "messages" in state
+        assert "trace" in state
         assert "user_input" in state
         assert "generated_code" in state
         assert "accessibility_issues" in state
         assert "design_issues" in state
+        assert "validation_checks" in state
         assert "final_output" in state
         assert "current_step" in state
         assert "github_examples" in state
@@ -601,7 +612,12 @@ class TestValidationPipeline:
 
         result = validator_node(state)
 
-        assert result == {"current_step": "validation_skipped"}
+        assert result["current_step"] == "validation_skipped"
+        # No lint/compile side-effect keys should be present -- only the
+        # current_step and the node's own structured trace entry.
+        assert set(result.keys()) == {"current_step", "trace"}
+        assert len(result["trace"]) == 1
+        assert result["trace"][0]["node"] == "validator"
 
     def test_validator_node_passes_valid_code_without_retry(self):
         """
@@ -848,3 +864,211 @@ fun ClickScreen() {
         report = result["validation_report"]
         assert report["lint_issues_count"] == 0 or report.get("auto_fixed") is True
         assert report["compilation"]["success"] is True
+
+
+class TestStructuredTraceAndVerdicts:
+    """Tests for story 2: TraceStep/CheckResult structured shapes."""
+
+    @staticmethod
+    def _initial_state(validate_code=False):
+        return {
+            "messages": [],
+            "trace": [],
+            "user_input": "Create screen",
+            "generated_code": "",
+            "accessibility_issues": [],
+            "design_issues": [],
+            "validation_checks": [],
+            "final_output": "",
+            "current_step": "start",
+            "github_examples": [],
+            "project_context": {},
+            "multi_file": False,
+            "validate_code": validate_code,
+            "retry_count": 0,
+            "last_validation_errors": [],
+            "lint_issues": [],
+            "auto_fixed": False,
+            "compilation_result": None,
+        }
+
+    def test_trace_has_one_entry_per_executed_node_full_run(self, mock_llm):
+        """
+        GIVEN a full run with validate_code=False
+        WHEN the graph completes
+        THEN state["trace"] has exactly one entry per node actually executed,
+        in execution order.
+        """
+        mock_llm.invoke.return_value = AIMessage(
+            content=(
+                "import androidx.compose.runtime.Composable\n"
+                "import androidx.compose.material3.Text\n\n"
+                "@Composable\nfun Screen() { Text(\"Hi\") }"
+            )
+        )
+
+        app = build_ui_generator_graph().compile()
+        result = app.invoke(self._initial_state(validate_code=False))
+
+        nodes = [step["node"] for step in result["trace"]]
+        assert nodes == [
+            "ui_generator",
+            "validator",
+            "accessibility_reviewer",
+            "ui_reviewer",
+            "output",
+        ]
+        # Every trace entry is a well-formed TraceStep
+        for step in result["trace"]:
+            assert set(step.keys()) == {"node", "summary", "detail"}
+
+    def test_trace_shows_two_entries_per_retried_node(self, mock_llm):
+        """
+        GIVEN a validator retry loop that fails once then passes
+        WHEN the graph completes
+        THEN trace shows two ui_generator and two validator entries, with no
+        dropped or duplicated unrelated entries.
+        """
+        bad_code = "@Composable\nfun Screen() { Text(\"Hi\")"  # unbalanced braces -> fails
+        good_code = (
+            "import androidx.compose.runtime.Composable\n"
+            "import androidx.compose.material3.Text\n\n"
+            "@Composable\nfun Screen() { Text(\"Hi\") }"
+        )
+        mock_llm.invoke.side_effect = [
+            AIMessage(content=bad_code),
+            AIMessage(content=good_code),
+        ]
+
+        app = build_ui_generator_graph().compile()
+        result = app.invoke(self._initial_state(validate_code=True))
+
+        nodes = [step["node"] for step in result["trace"]]
+        assert nodes.count("ui_generator") == 2
+        assert nodes.count("validator") == 2
+        assert nodes.count("accessibility_reviewer") == 1
+        assert nodes.count("ui_reviewer") == 1
+        assert nodes.count("output") == 1
+        assert len(nodes) == 7
+
+    def test_reviewers_never_return_empty_findings_on_clean_code(self):
+        """
+        GIVEN generated code that trips none of the accessibility/design
+        detection conditions (no Image, Button, Text, Arrangement, or
+        Alignment usage; MaterialTheme and padding present)
+        WHEN accessibility_reviewer_agent and ui_reviewer_agent run
+        THEN each returns a non-empty list of CheckResult with status="pass"
+        """
+        clean_code = (
+            "@Composable\n"
+            "fun Clean() {\n"
+            "    MaterialTheme {\n"
+            "        Box(modifier = Modifier.padding(16.dp)) {}\n"
+            "    }\n"
+            "}"
+        )
+        state = {"generated_code": clean_code, "messages": []}
+
+        accessibility_result = accessibility_reviewer_agent(state)
+        design_result = ui_reviewer_agent(state)
+
+        accessibility_issues = accessibility_result["accessibility_issues"]
+        design_issues = design_result["design_issues"]
+
+        assert len(accessibility_issues) == 1
+        assert accessibility_issues[0]["status"] == "pass"
+        assert accessibility_issues[0]["check"] == "accessibility_summary"
+
+        assert len(design_issues) == 1
+        assert design_issues[0]["status"] == "pass"
+
+    def test_validation_checks_contains_fail_for_missing_import_lint_issue(self):
+        """
+        GIVEN generated code missing an import
+        WHEN validator_node runs with validate_code=True
+        THEN validation_checks contains a fail-status CheckResult for that lint
+        issue, plus one compilation CheckResult.
+        """
+        state = {
+            "validate_code": True,
+            "generated_code": "@Composable\nfun Screen() { Text(\"Hi\") }",  # missing imports
+            "retry_count": 0,
+        }
+
+        result = validator_node(state)
+
+        validation_checks = result["validation_checks"]
+        assert any(
+            check["check"] == "lint" and check["status"] == "fail"
+            for check in validation_checks
+        )
+        assert any(check["check"] == "compilation" for check in validation_checks)
+        assert len(result["trace"]) == 1
+        assert result["trace"][0]["node"] == "validator"
+
+    def test_validation_checks_severity_to_status_mapping(self):
+        """
+        GIVEN lint issues of every severity (error, warning, info)
+        WHEN validator_node maps LintIssue -> CheckResult
+        THEN error->fail, warning->warn, info->pass, pinned per severity so a
+        future swap of the mapping table would be caught.
+        """
+        lint_issues = [
+            LintIssue(severity="error", message="err msg", line=1, suggestion="fix1"),
+            LintIssue(severity="warning", message="warn msg", line=2, suggestion="fix2"),
+            LintIssue(severity="info", message="info msg", line=3, suggestion="fix3"),
+        ]
+        compilation_result = CompilationResult(success=True, errors=[], warnings=[])
+
+        with patch(
+            "src.multi_agent_mobile_ui_assistant.android_tools_mcp.AndroidLintMCP.validate_compose_code",
+            return_value=lint_issues,
+        ), patch(
+            "src.multi_agent_mobile_ui_assistant.android_tools_mcp.GradleMCP.check_compilation",
+            return_value=compilation_result,
+        ):
+            state = {
+                "validate_code": True,
+                "generated_code": "@Composable\nfun Screen() { Text(\"Hi\") }",
+                "retry_count": 0,
+            }
+            result = validator_node(state)
+
+        lint_checks = [c for c in result["validation_checks"] if c["check"] == "lint"]
+        assert len(lint_checks) == 3
+        status_by_message = {
+            c["message"].split(" (line")[0]: c["status"] for c in lint_checks
+        }
+        assert status_by_message["err msg"] == "fail"
+        assert status_by_message["warn msg"] == "warn"
+        assert status_by_message["info msg"] == "pass"
+
+    def test_validation_checks_accumulate_across_retries(self, mock_llm):
+        """
+        GIVEN a validator retry loop that fails once then passes
+        WHEN the graph completes
+        THEN validation_checks holds compilation verdicts from BOTH attempts
+        (accumulated the same way trace does), not just the last one --
+        otherwise the first (failed) attempt's structured verdicts would be
+        silently discarded.
+        """
+        bad_code = "@Composable\nfun Screen() { Text(\"Hi\")"  # unbalanced braces -> fails
+        good_code = (
+            "import androidx.compose.runtime.Composable\n"
+            "import androidx.compose.material3.Text\n\n"
+            "@Composable\nfun Screen() { Text(\"Hi\") }"
+        )
+        mock_llm.invoke.side_effect = [
+            AIMessage(content=bad_code),
+            AIMessage(content=good_code),
+        ]
+
+        app = build_ui_generator_graph().compile()
+        result = app.invoke(self._initial_state(validate_code=True))
+
+        compilation_checks = [
+            c for c in result["validation_checks"] if c["check"] == "compilation"
+        ]
+        assert len(compilation_checks) == 2
+        assert any(c["status"] == "fail" for c in compilation_checks)
+        assert any(c["status"] == "pass" for c in compilation_checks)

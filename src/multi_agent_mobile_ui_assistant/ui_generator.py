@@ -12,6 +12,11 @@ MCP Tools enhance each stage:
 - FileSystem MCP: Accesses existing project structure
 - Android Tools MCP: Validates and auto-fixes generated code
 - Figma MCP: Extracts design specifications
+
+Structured observability: every node appends one TraceStep to state["trace"]
+(accumulated across the whole run, including retries), and each check-producing
+node (validator, accessibility_reviewer, ui_reviewer) emits its findings as
+CheckResult verdicts (status: pass/fail/warn) instead of ad-hoc prose strings.
 """
 
 from typing import TypedDict, Annotated, Literal
@@ -20,15 +25,32 @@ from langgraph.graph.message import add_messages
 from langchain_core.messages import SystemMessage, HumanMessage
 from .llm_config import get_default_llm
 import json
+import operator
+
+
+class TraceStep(TypedDict):
+    """One structured record of a node's execution, appended to state['trace']."""
+    node: str
+    summary: str
+    detail: str
+
+
+class CheckResult(TypedDict):
+    """One structured pass/fail/warn verdict emitted by a check-producing node."""
+    check: str
+    status: Literal["pass", "fail", "warn"]
+    message: str
 
 
 class UIGeneratorState(TypedDict):
     """State for the UI generator workflow."""
     messages: Annotated[list, add_messages]
+    trace: Annotated[list, operator.add]  # Structured per-node execution trace (TraceStep entries)
     user_input: str
     generated_code: str
-    accessibility_issues: list[str]
-    design_issues: list[str]
+    accessibility_issues: list[CheckResult]
+    design_issues: list[CheckResult]
+    validation_checks: Annotated[list, operator.add]  # In-graph validator: structured lint + compilation verdicts, accumulated across retries (list[CheckResult])
     final_output: str
     current_step: str
     github_examples: list  # MCP: GitHub examples for context
@@ -389,10 +411,21 @@ import androidx.compose.ui.unit.dp
             }
             generated_code = _generate_template_code(layout_plan)
     
+    is_retry = bool(state.get("last_validation_errors"))
+    trace_step: TraceStep = {
+        "node": "ui_generator",
+        "summary": "regenerated code after validation failure" if is_retry else "generated code",
+        "detail": (
+            f"{len(generated_code)} chars"
+            + (f", retry {state.get('retry_count', 0)}" if is_retry else "")
+        ),
+    }
+
     return {
         "messages": [{"role": "assistant", "content": "UI code generation complete"}],
         "generated_code": generated_code,
-        "current_step": "code_generated"
+        "current_step": "code_generated",
+        "trace": [trace_step],
     }
 
 
@@ -487,32 +520,55 @@ def accessibility_reviewer_agent(state: UIGeneratorState) -> UIGeneratorState:
     generated_code = state.get("generated_code", "")
     print(f"\n[Accessibility Reviewer] Checking accessibility...")
     
-    issues = []
-    
+    issues: list[CheckResult] = []
+
     # Check for content descriptions on images
     if "Image" in generated_code and "contentDescription" not in generated_code:
-        issues.append("Missing contentDescription for Image components")
-    
+        issues.append({
+            "check": "content_description",
+            "status": "fail",
+            "message": "Missing contentDescription for Image components",
+        })
+
     # Check for touch target sizes
     if "Button" in generated_code:
         if ".size(" not in generated_code or "48.dp" not in generated_code:
-            issues.append("Ensure buttons meet minimum touch target size (48dp)")
-    
+            issues.append({
+                "check": "touch_target_size",
+                "status": "warn",
+                "message": "Ensure buttons meet minimum touch target size (48dp)",
+            })
+
     # Check for semantic content
     if "Text" in generated_code:
-        issues.append("Consider adding semantics for screen readers")
-    
+        issues.append({
+            "check": "semantics",
+            "status": "warn",
+            "message": "Consider adding semantics for screen readers",
+        })
+
     if not issues:
-        issues.append("No major accessibility issues found")
-    
+        issues.append({
+            "check": "accessibility_summary",
+            "status": "pass",
+            "message": "No major accessibility issues found",
+        })
+
     print(f"[Accessibility Reviewer] Found {len(issues)} items to review")
     for issue in issues:
-        print(f"  - {issue}")
-    
+        print(f"  - {issue['message']}")
+
+    trace_step: TraceStep = {
+        "node": "accessibility_reviewer",
+        "summary": f"{len(issues)} accessibility check(s) recorded",
+        "detail": ", ".join(f"{issue['check']}={issue['status']}" for issue in issues),
+    }
+
     return {
         "messages": [{"role": "assistant", "content": "Accessibility review complete"}],
         "accessibility_issues": issues,
-        "current_step": "accessibility_reviewed"
+        "current_step": "accessibility_reviewed",
+        "trace": [trace_step],
     }
 
 
@@ -528,37 +584,68 @@ def ui_reviewer_agent(state: UIGeneratorState) -> UIGeneratorState:
     generated_code = state.get("generated_code", "")
     print(f"\n[UI Reviewer] Evaluating against Material 3 guidelines...")
     
-    issues = []
-    
+    issues: list[CheckResult] = []
+
     # Check for Material 3 compliance
     if "MaterialTheme" not in generated_code:
-        issues.append("Consider using MaterialTheme for consistent theming")
-    
+        issues.append({
+            "check": "material_theme",
+            "status": "warn",
+            "message": "Consider using MaterialTheme for consistent theming",
+        })
+
     # Check for proper spacing
     if "padding" in generated_code:
-        issues.append("Good: Using padding for spacing")
+        issues.append({
+            "check": "padding",
+            "status": "pass",
+            "message": "Good: Using padding for spacing",
+        })
     else:
-        issues.append("Consider adding padding for better visual hierarchy")
-    
+        issues.append({
+            "check": "padding",
+            "status": "warn",
+            "message": "Consider adding padding for better visual hierarchy",
+        })
+
     # Check for proper arrangement
     if "Arrangement" in generated_code:
-        issues.append("Good: Using Arrangement for proper spacing")
-    
+        issues.append({
+            "check": "arrangement",
+            "status": "pass",
+            "message": "Good: Using Arrangement for proper spacing",
+        })
+
     # Check for alignment
     if "Alignment" in generated_code:
-        issues.append("Good: Using Alignment for proper positioning")
-    
+        issues.append({
+            "check": "alignment",
+            "status": "pass",
+            "message": "Good: Using Alignment for proper positioning",
+        })
+
     if not issues:
-        issues.append("Code follows Material 3 guidelines")
-    
+        issues.append({
+            "check": "design_summary",
+            "status": "pass",
+            "message": "Code follows Material 3 guidelines",
+        })
+
     print(f"[UI Reviewer] Found {len(issues)} design considerations")
     for issue in issues:
-        print(f"  - {issue}")
-    
+        print(f"  - {issue['message']}")
+
+    trace_step: TraceStep = {
+        "node": "ui_reviewer",
+        "summary": f"{len(issues)} design check(s) recorded",
+        "detail": ", ".join(f"{issue['check']}={issue['status']}" for issue in issues),
+    }
+
     return {
         "messages": [{"role": "assistant", "content": "UI review complete"}],
         "design_issues": issues,
-        "current_step": "ui_reviewed"
+        "current_step": "ui_reviewed",
+        "trace": [trace_step],
     }
 
 
@@ -591,28 +678,38 @@ def output_node(state: UIGeneratorState) -> UIGeneratorState:
     ]
     
     for issue in accessibility_issues:
-        output_lines.append(f"  • {issue}")
-    
+        output_lines.append(f"  • {issue['message']}")
+
     output_lines.extend([
         "",
         "=" * 70,
         "DESIGN REVIEW (Material 3 Guidelines)",
         "=" * 70,
     ])
-    
+
     for issue in design_issues:
-        output_lines.append(f"  • {issue}")
-    
+        output_lines.append(f"  • {issue['message']}")
+
     output_lines.append("=" * 70)
-    
+
     final_output = "\n".join(output_lines)
-    
+
     print(f"[Output] Final output prepared")
-    
+
+    trace_step: TraceStep = {
+        "node": "output",
+        "summary": "final output assembled",
+        "detail": (
+            f"{len(accessibility_issues)} accessibility check(s), "
+            f"{len(design_issues)} design check(s)"
+        ),
+    }
+
     return {
         "messages": [{"role": "assistant", "content": "Output generation complete"}],
         "final_output": final_output,
-        "current_step": "complete"
+        "current_step": "complete",
+        "trace": [trace_step],
     }
 
 
@@ -641,9 +738,20 @@ def validator_node(state: UIGeneratorState) -> UIGeneratorState:
     If the lint/auto-fix/compile calls themselves raise (e.g. a bug in the MCP
     tools), that is treated the same as a failed compilation attempt -- it must
     never crash the graph and block demo completion.
+
+    It also returns `validation_checks`: one `CheckResult` per `LintIssue` (mapping
+    `severity` -> `status` as error->fail, warning->warn, info->pass) plus one
+    trailing `CheckResult` with `check="compilation"` (pass/fail on
+    `compilation_result.success`). This field accumulates across retries (like
+    `trace`), so it holds every attempt's verdicts, not just the last.
     """
     if not state.get("validate_code"):
-        return {"current_step": "validation_skipped"}
+        skip_trace_step: TraceStep = {
+            "node": "validator",
+            "summary": "validation skipped",
+            "detail": "validate_code is falsy; no lint/compile calls made",
+        }
+        return {"current_step": "validation_skipped", "trace": [skip_trace_step]}
 
     from .android_tools_mcp import AndroidLintMCP, CompilationResult, GradleMCP
 
@@ -690,6 +798,35 @@ def validator_node(state: UIGeneratorState) -> UIGeneratorState:
         last_validation_errors = []
         current_step = "validated"
 
+    severity_to_status = {"error": "fail", "warning": "warn", "info": "pass"}
+    validation_checks: list[CheckResult] = [
+        {
+            "check": "lint",
+            "status": severity_to_status.get(issue.severity, "warn"),
+            "message": f"{issue.message} (line {issue.line})",
+        }
+        for issue in lint_issues
+    ]
+    validation_checks.append({
+        "check": "compilation",
+        "status": "pass" if compilation_result.success else "fail",
+        "message": (
+            "Compilation succeeded"
+            if compilation_result.success
+            else ("; ".join(compilation_result.errors) or "Compilation failed")
+        ),
+    })
+
+    trace_step: TraceStep = {
+        "node": "validator",
+        "summary": current_step,
+        "detail": (
+            f"{len(lint_issues)} lint issue(s), "
+            f"compilation {'succeeded' if compilation_result.success else 'failed'}, "
+            f"retry_count={retry_count}"
+        ),
+    }
+
     return {
         "generated_code": fixed_code,
         "lint_issues": lint_issues,
@@ -698,6 +835,8 @@ def validator_node(state: UIGeneratorState) -> UIGeneratorState:
         "retry_count": retry_count,
         "last_validation_errors": last_validation_errors,
         "current_step": current_step,
+        "validation_checks": validation_checks,
+        "trace": [trace_step],
     }
 
 
@@ -805,10 +944,12 @@ def generate_ui_from_description(
     # Initial state
     initial_state = {
         "messages": [],
+        "trace": [],
         "user_input": user_description,
         "generated_code": "",
         "accessibility_issues": [],
         "design_issues": [],
+        "validation_checks": [],
         "final_output": "",
         "current_step": "start",
         "github_examples": github_examples or [],
