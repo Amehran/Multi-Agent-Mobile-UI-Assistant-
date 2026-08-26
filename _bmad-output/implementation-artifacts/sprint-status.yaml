@@ -20,7 +20,7 @@ development_status:
   epic-1: in-progress
   1-in-graph-validator-retry-loop: done
   2-structured-trace-and-verdict-shapes: done
-  3-streamlit-trace-panel-and-verdict-rendering: backlog
+  3-streamlit-trace-panel-and-verdict-rendering: done
   4-curated-demo-prompts-and-readme-pipeline-correction: backlog
   epic-1-retrospective: optional
 

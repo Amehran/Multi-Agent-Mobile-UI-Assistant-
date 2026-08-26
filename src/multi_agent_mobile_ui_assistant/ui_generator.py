@@ -919,10 +919,17 @@ def generate_ui_from_description(
         project_context: Optional dict with existing project structure info
         multi_file: If True, return dict with multiple files; if False, return single file string
         validate: If True, run Android Tools MCP validation and auto-fix
-        return_report: If True, return dict with code and validation report
-        
+        return_report: If True (and multi_file is False), return a dict with
+            `code`, `validation_report`, `trace`, `accessibility_issues`,
+            `design_issues`, and `validation_checks` off final graph state.
+            `trace`/`accessibility_issues`/`design_issues`/`validation_checks`
+            are always populated regardless of `validate`; `validation_report`
+            is populated only when `validate` is also True, else `None`.
+
     Returns:
-        Final output with generated code and reviews (str or dict based on multi_file/return_report)
+        Final output with generated code and reviews (str, or dict based on
+        multi_file/return_report -- see `return_report` above for the
+        structured dict's shape)
     """
     print("=" * 70)
     print("JETPACK COMPOSE UI GENERATOR")
@@ -971,13 +978,17 @@ def generate_ui_from_description(
     final_output = result.get("final_output", "")
     generated_code = result.get("generated_code", "")
 
-    # Assemble the validation report from final graph state if requested
-    if validate and return_report:
-        lint_issues = result.get("lint_issues", [])
-        compilation_result = result.get("compilation_result")
-        return {
-            "code": generated_code,
-            "validation_report": {
+    # Assemble the structured return dict from final graph state if requested.
+    # The outer guard no longer depends on `validate` -- trace/CheckResult
+    # lists are always available; `validate` still gates whether
+    # `validation_report` is populated below. `not multi_file` keeps
+    # multi_file's own dict-of-files contract untouched.
+    if return_report and not multi_file:
+        validation_report = None
+        if validate:
+            lint_issues = result.get("lint_issues", [])
+            compilation_result = result.get("compilation_result")
+            validation_report = {
                 "lint_issues": [
                     {
                         "severity": issue.severity,
@@ -995,6 +1006,13 @@ def generate_ui_from_description(
                     "warnings": compilation_result.warnings if compilation_result else []
                 }
             }
+        return {
+            "code": generated_code,
+            "validation_report": validation_report,
+            "trace": result.get("trace", []),
+            "accessibility_issues": result.get("accessibility_issues", []),
+            "design_issues": result.get("design_issues", []),
+            "validation_checks": result.get("validation_checks", []),
         }
 
     # Return based on multi_file flag

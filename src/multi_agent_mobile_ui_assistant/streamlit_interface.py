@@ -67,9 +67,13 @@ if 'history' not in st.session_state:
 if 'current_code' not in st.session_state:
     st.session_state.current_code = ""
 if 'current_accessibility' not in st.session_state:
-    st.session_state.current_accessibility = ""
+    st.session_state.current_accessibility = []
 if 'current_design' not in st.session_state:
-    st.session_state.current_design = ""
+    st.session_state.current_design = []
+if 'current_trace' not in st.session_state:
+    st.session_state.current_trace = []
+if 'current_validation_checks' not in st.session_state:
+    st.session_state.current_validation_checks = []
 if 'iteration_count' not in st.session_state:
     st.session_state.iteration_count = 0
 if 'llm_provider' not in st.session_state:
@@ -107,28 +111,58 @@ def extract_code_from_output(output: str) -> str:
     return "\n".join(code_lines) if code_lines else output
 
 
-def extract_section(output: str, section_name: str) -> str:
-    """Extract a specific section from the output."""
-    lines = output.split("\n")
-    section_lines = []
-    in_section = False
-    header_separator_skipped = False
-    
-    for line in lines:
-        if section_name in line:
-            in_section = True
-            continue
-        if in_section:
-            if "=" * 10 in line:
-                if not header_separator_skipped:
-                    header_separator_skipped = True
-                    continue
-                else:
-                    break
-            if line.strip().startswith("•"):
-                section_lines.append(line)
-    
-    return "\n".join(section_lines) if section_lines else "No issues found"
+def render_check_results(title: str, checks: list) -> None:
+    """
+    Render a list of CheckResult dicts using a generic status-driven icon
+    (pass -> st.success, warn -> st.warning, fail -> st.error). No message-text
+    sniffing -- rendering is keyed only on the `status` field. Uses `.get()`
+    with sensible defaults throughout so a malformed/missing key degrades
+    gracefully instead of crashing the tab.
+    """
+    if title:
+        st.subheader(title)
+    if not checks:
+        st.info("No checks recorded.")
+        return
+    icon_fns = {"pass": st.success, "warn": st.warning, "fail": st.error}
+    for c in checks:
+        icon_fn = icon_fns.get(c.get("status"), st.info)
+        icon_fn(c.get("message", ""))
+
+
+def render_trace_steps(title: str, steps: list) -> None:
+    """
+    Render a list of TraceStep dicts: one line per step (node + summary),
+    with the step's detail shown in a nested expander. Uses `.get()` with
+    sensible defaults throughout so a malformed/missing key degrades
+    gracefully instead of crashing the tab.
+    """
+    if title:
+        st.subheader(title)
+    if not steps:
+        st.info("No trace recorded.")
+        return
+    for step in steps:
+        node = step.get("node", "")
+        summary = step.get("summary", "")
+        with st.expander(f"**{node}** — {summary}"):
+            st.caption(step.get("detail", ""))
+
+
+def render_review(title: str, review) -> None:
+    """
+    Render a "review" that may be either a list[CheckResult] (produced by the
+    initial-generation flow, story 3) or a legacy prose string (still produced
+    by `refine_ui`'s free-form LLM review, which this story does not touch).
+    Dispatches on type so viewing Reviews after a Generate -> Refine sequence
+    doesn't crash by iterating a string as if it were a list of dicts.
+    """
+    if isinstance(review, list):
+        render_check_results(title, review)
+    else:
+        if title:
+            st.subheader(title)
+        st.markdown(f'<div class="review-section">{review}</div>', unsafe_allow_html=True)
 
 
 def generate_initial_ui(description: str):
@@ -141,7 +175,6 @@ def generate_initial_ui(description: str):
         try:
             # Get options from session state
             validate = st.session_state.get('validate_code', True)
-            return_report = st.session_state.get('show_validation_report', False)
             multi_file = st.session_state.get('multi_file', False)
             use_figma = st.session_state.get('use_figma', False)
             
@@ -171,53 +204,67 @@ def generate_initial_ui(description: str):
             
             # If not using Figma or Figma failed, use standard generation
             if not figma_design:
-                # Generate UI with options
+                # Generate UI with options. `return_report` is requested
+                # unconditionally so trace/CheckResult data is always available
+                # for the Reviews/Trace tabs, regardless of validate/multi_file.
                 output = generate_ui_from_description(
                     description,
                     validate=validate,
-                    return_report=return_report and validate,
+                    return_report=True,
                     multi_file=multi_file
                 )
-                
-                # Handle validation report if returned
-                validation_report = None
-                if isinstance(output, dict) and 'code' in output:
+
+                if multi_file:
+                    # Multi-file returns its own dict-of-files contract --
+                    # no trace/CheckResult data is produced for this path.
+                    code = output
+                    validation_report = None
+                    trace = []
+                    accessibility_issues = []
+                    design_issues = []
+                    validation_checks = []
+                else:
                     code = output['code']
                     validation_report = output.get('validation_report')
-                else:
-                    code = output
+                    trace = output.get('trace', [])
+                    accessibility_issues = output.get('accessibility_issues', [])
+                    design_issues = output.get('design_issues', [])
+                    validation_checks = output.get('validation_checks', [])
             else:
-                # Figma design was used
+                # Figma design was used -- no trace/CheckResult data either.
                 validation_report = None
-            
+                trace = []
+                accessibility_issues = []
+                design_issues = []
+                validation_checks = []
+
             # Parse output
             if not multi_file and not figma_design:
                 code_text = extract_code_from_output(code) if isinstance(code, str) else code
             else:
                 code_text = code  # Multi-file or Figma returns structured data
-                
-            accessibility = extract_section(code if isinstance(code, str) else str(code), "ACCESSIBILITY REVIEW")
-            design = extract_section(code if isinstance(code, str) else str(code), "DESIGN REVIEW")
-            
+
             # Update session state
             st.session_state.current_code = code_text
-            st.session_state.current_accessibility = accessibility
-            st.session_state.current_design = design
+            st.session_state.current_trace = trace
+            st.session_state.current_accessibility = accessibility_issues
+            st.session_state.current_design = design_issues
+            st.session_state.current_validation_checks = validation_checks
             st.session_state.iteration_count += 1
             st.session_state.validation_report = validation_report
-            
+
             # Add to history
             st.session_state.history.append({
                 "iteration": st.session_state.iteration_count,
                 "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 "description": description,
                 "code": code_text,
-                "accessibility": accessibility,
-                "design": design,
+                "accessibility": accessibility_issues,
+                "design": design_issues,
                 "feedback": "",
                 "validation_report": validation_report
             })
-            
+
             st.success("✅ UI generated successfully!")
             if validate and validation_report:
                 st.info("🔍 Code validation completed - check the Validation Report tab")
@@ -366,8 +413,10 @@ def reset_session():
     """Reset the session and clear all history."""
     st.session_state.history = []
     st.session_state.current_code = ""
-    st.session_state.current_accessibility = ""
-    st.session_state.current_design = ""
+    st.session_state.current_accessibility = []
+    st.session_state.current_design = []
+    st.session_state.current_trace = []
+    st.session_state.current_validation_checks = []
     st.session_state.iteration_count = 0
     st.success("Session reset successfully!")
     st.rerun()
@@ -649,17 +698,7 @@ def main():
             key="validate_checkbox"
         )
         st.session_state.validate_code = validate_code
-        
-        # Show validation report
-        show_validation_report = st.checkbox(
-            "Show Validation Report",
-            value=st.session_state.get('show_validation_report', False),
-            help="Display detailed validation report including lint issues and compilation checks",
-            key="validation_report_checkbox",
-            disabled=not validate_code
-        )
-        st.session_state.show_validation_report = show_validation_report
-        
+
         st.divider()
         
         st.header("📋 How It Works")
@@ -750,11 +789,18 @@ def main():
         if st.session_state.current_code:
             st.header("💻 Generated Code")
             
-            # Create tabs for Code, Preview, and Validation
+            # Create tabs for Code, Preview, Trace, and Validation -- Trace and
+            # Validation Report are conditional since not every path produces them.
             tabs = ["📝 Code", "👁️ Preview"]
+            trace_tab_index = None
+            validation_tab_index = None
+            if st.session_state.get('current_trace'):
+                trace_tab_index = len(tabs)
+                tabs.append("🔎 Trace")
             if st.session_state.get('validation_report'):
+                validation_tab_index = len(tabs)
                 tabs.append("🔍 Validation Report")
-            
+
             tab_objects = st.tabs(tabs)
             
             # Code tab
@@ -784,30 +830,26 @@ def main():
                 st.markdown(preview_html, unsafe_allow_html=True)
                 
                 st.info("💡 **Tip:** This preview shows the structure and hierarchy of your UI components. For a real preview, copy the code into Android Studio.")
-            
+
+            # Trace tab (if available)
+            if trace_tab_index is not None:
+                with tab_objects[trace_tab_index]:
+                    st.markdown("### 🔎 Execution Trace")
+                    st.markdown("*Structured record of each node the graph executed, in order*")
+                    render_trace_steps("", st.session_state.current_trace)
+
             # Validation Report tab (if available)
-            if st.session_state.get('validation_report'):
-                with tab_objects[2]:
+            if validation_tab_index is not None:
+                with tab_objects[validation_tab_index]:
                     st.markdown("### 🔍 Validation Report")
                     st.markdown("*Automated code quality and compilation checks*")
-                    
+
                     report = st.session_state.validation_report
-                    
-                    # Lint Issues
-                    st.subheader("📋 Lint Issues")
-                    lint_issues = report.get('lint_issues', [])
-                    if lint_issues:
-                        for issue in lint_issues:
-                            severity = issue.get('severity', 'info')
-                            icon = "🔴" if severity == "error" else "🟡" if severity == "warning" else "🔵"
-                            st.markdown(f"{icon} **{issue.get('message', 'Unknown issue')}**")
-                            if issue.get('line'):
-                                st.caption(f"Line {issue['line']}")
-                    else:
-                        st.success("✅ No lint issues found!")
-                    
+
+                    render_check_results("📋 Validation Checks", st.session_state.get('current_validation_checks', []))
+
                     st.divider()
-                    
+
                     # Compilation Check
                     st.subheader("🔨 Compilation Check")
                     compilation = report.get('compilation', {})
@@ -818,30 +860,19 @@ def main():
                         errors = compilation.get('errors', [])
                         for error in errors:
                             st.code(error, language="text")
-                    
-                    st.divider()
-                    
-                    # Auto-fixes Applied
-                    if report.get('auto_fixes'):
-                        st.subheader("🔧 Auto-fixes Applied")
-                        st.info(f"Applied {len(report['auto_fixes'])} automatic fixes to the code")
-                        for fix in report['auto_fixes']:
-                            st.markdown(f"• {fix}")
-            
+
             st.divider()
-            
+
             # Reviews
             st.header("📋 Reviews")
-            
+
             col1, col2 = st.columns(2)
-            
+
             with col1:
-                st.subheader("♿ Accessibility Review")
-                st.markdown(f'<div class="review-section">{st.session_state.current_accessibility}</div>', unsafe_allow_html=True)
-            
+                render_review("♿ Accessibility Review", st.session_state.current_accessibility)
+
             with col2:
-                st.subheader("🎨 Design Review")
-                st.markdown(f'<div class="review-section">{st.session_state.current_design}</div>', unsafe_allow_html=True)
+                render_review("🎨 Design Review", st.session_state.current_design)
         else:
             st.info("👆 Enter a UI description above and click 'Generate UI' to get started!")
     
@@ -861,10 +892,16 @@ def main():
                     col1, col2 = st.columns(2)
                     with col1:
                         st.markdown("**Accessibility:**")
-                        st.markdown(item['accessibility'])
+                        if isinstance(item['accessibility'], list):
+                            render_check_results("", item['accessibility'])
+                        else:
+                            st.markdown(item['accessibility'])
                     with col2:
                         st.markdown("**Design:**")
-                        st.markdown(item['design'])
+                        if isinstance(item['design'], list):
+                            render_check_results("", item['design'])
+                        else:
+                            st.markdown(item['design'])
         else:
             st.info("No history yet. Generate a UI to start tracking iterations!")
     

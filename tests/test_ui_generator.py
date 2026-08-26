@@ -786,6 +786,60 @@ class TestValidationPipeline:
         assert isinstance(result, dict)
         assert result["validation_report"]["compilation"]["success"] is False
 
+    def test_return_report_without_validate_returns_structured_dict(self, mock_llm):
+        """
+        GIVEN return_report=True and validate=False
+        WHEN generate_ui_from_description runs
+        THEN branch A's guard is decoupled from `validate` -- it still returns
+        the structured dict (code/trace/CheckResult lists), with
+        validation_report=None since validation never ran.
+        """
+        mock_llm.invoke.return_value = AIMessage(
+            content="@Composable\nfun Screen() { Text(\"Hi\") }"
+        )
+
+        result = generate_ui_from_description(
+            "Create screen",
+            validate=False,
+            return_report=True
+        )
+
+        assert isinstance(result, dict)
+        assert "code" in result
+        assert result["validation_report"] is None
+        assert "trace" in result and len(result["trace"]) > 0
+        assert "accessibility_issues" in result
+        assert "design_issues" in result
+        assert "validation_checks" in result
+
+    def test_return_report_with_multi_file_still_returns_file_dict(self, mock_llm):
+        """
+        GIVEN multi_file=True and return_report=True
+        WHEN generate_ui_from_description runs
+        THEN the `not multi_file` guard keeps branch A from firing -- the
+        multi_file dict-of-files contract is untouched.
+        """
+        mock_llm.invoke.return_value = AIMessage(
+            content="@Composable\nfun Screen() { Text(\"Hi\") }"
+        )
+
+        result = generate_ui_from_description(
+            "Create screen",
+            validate=False,
+            return_report=True,
+            multi_file=True
+        )
+
+        assert isinstance(result, dict)
+        assert "trace" not in result
+        assert "validation_report" not in result
+
+        # The multi_file dict-of-files contract itself must still be intact:
+        # non-empty, filepath -> code string mapping (parse_multi_file_output's
+        # contract), containing the actual generated code.
+        assert result != {}
+        assert all(isinstance(k, str) and isinstance(v, str) for k, v in result.items())
+        assert any("@Composable" in v for v in result.values())
 
     def test_validation_preserves_code_functionality(self, mock_llm):
         """
