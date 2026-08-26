@@ -1,0 +1,59 @@
+- id: "1"
+  title: In-graph validator with bounded retry loop
+  description: >-
+    Implements CAP-4: add a `validator` node (wraps AndroidLintMCP +
+    GradleMCP) between ui_generator and accessibility_reviewer, with a
+    conditional edge back to ui_generator on failure per AD-2/AD-5.
+  spec_checkpoint: true
+  done_checkpoint: true
+  invoke_dev_with: >-
+    Follow architecture AD-2 and AD-5 exactly: retry_count starts at 0,
+    caps at 2, and last_validation_errors must be included in the
+    regeneration prompt on each retry so the generator targets the
+    specific failure rather than resampling blindly. On failure after
+    2 retries, proceed forward anyway (never block demo completion).
+    Do not touch ui_generator's single-LLM-call design (AD-1).
+
+- id: "2"
+  title: Structured trace and verdict shapes
+  description: >-
+    Implements CAP-2/CAP-3: every graph node appends a TraceStep
+    {node, summary, detail} to state["trace"] (AD-4), and every
+    check-producing node (validator, accessibility_reviewer,
+    ui_reviewer) returns CheckResult{check, status, message} (AD-3)
+    instead of prose lists.
+  spec_checkpoint: false
+  done_checkpoint: false
+  invoke_dev_with: >-
+    Map LintIssue.severity/CompilationResult.success into
+    CheckResult.status at the validator boundary. Reviewer nodes must
+    stop mixing "Good: ..." praise strings into the same list as
+    failures - one CheckResult per check performed, status only.
+
+- id: "3"
+  title: Streamlit trace panel and verdict rendering
+  description: >-
+    Surfaces story 1 and 2's state (state["trace"], CheckResult lists)
+    in streamlit_interface.py as a trace panel and generic pass/fail/warn
+    verdict display, replacing any prose-based rendering.
+  spec_checkpoint: false
+  done_checkpoint: true
+  invoke_dev_with: >-
+    Render generically off CheckResult.status - no string matching on
+    message text. Trace panel should read directly from result["trace"]
+    with no reconstruction from console output.
+
+- id: "4"
+  title: Curated demo prompts and README pipeline correction
+  description: >-
+    Implements CAP-8: add 3 documented demo prompts mixing concrete
+    requirements with fuzzy style cues (same 3 used in CAP-1's success
+    signal), and correct the README's pipeline diagram to match the
+    real graph nodes per AD-1 (drop the fictitious Intent Parser /
+    Layout Planner stages).
+  spec_checkpoint: false
+  done_checkpoint: false
+  invoke_dev_with: >-
+    Also note GradleMCP.check_compilation is a heuristic, not real
+    compilation - document this as a known limitation near wherever
+    the validation report is described.
