@@ -51,3 +51,8 @@ htmlcov/
 
 # Logs
 *.log
+
+# BMad tooling (local skills/agents framework, not project source)
+.claude/
+.agents/
+_bmad/
